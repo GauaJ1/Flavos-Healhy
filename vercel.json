@@ -26,15 +26,5 @@
         { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
       ]
     }
-  ],
-  "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "/index.html"
-    },
-    {
-      "source": "^(?!.*\\.).*$",
-      "destination": "/index.html"
-    }
   ]
 }
