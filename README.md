@@ -19,3 +19,4 @@ View your app in AI Studio: https://ai.studio/apps/drive/1aLusDkj6_gvkON27jyFNw1
 3. Run the app:
    `npm run dev`
 4. Test!
+5. Be happy!
