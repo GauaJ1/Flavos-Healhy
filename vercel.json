@@ -7,15 +7,17 @@
       "config": { "distDir": "dist" }
     }
   ],
-  "rewrites": [
-    { "source": "/sw.js", "destination": "/sw.js" },
-    { "source": "/manifest.json", "destination": "/manifest.json" },
-    { "source": "/logo.png", "destination": "/logo.png" },
-    { "source": "/icons/(.*)", "destination": "/icons/$1" },
-    { "source": "/assets/(.*)", "destination": "/assets/$1" },
+  "routes": [
     {
-      "source": "/(.*)",
-      "destination": "/index.html"
+      "src": "/sw.js",
+      "dest": "/sw.js"
+    },
+    {
+      "handle": "filesystem"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
     }
   ],
   "headers": [
