@@ -68,7 +68,7 @@ const responseSchema = {
   required: ['isRealFood', 'totalCalories', 'foods', 'feedback', 'suggestions']
 };
 
-export const analyzeImage = async (base64Image: string): Promise<AnalysisResult> => {
+export const analyzeImage = async (base64Image: string, userContext?: string): Promise<AnalysisResult> => {
   const imagePart = {
     inlineData: {
       mimeType: 'image/jpeg',
@@ -76,8 +76,7 @@ export const analyzeImage = async (base64Image: string): Promise<AnalysisResult>
     }
   };
 
-  const textPart = {
-    text: `Você é um nutricionista rigoroso e um especialista em visão computacional.
+  let promptText = `Você é um nutricionista rigoroso e um especialista em visão computacional.
     
     SUA PRIMEIRA E MAIS IMPORTANTE TAREFA É A VALIDAÇÃO DA IMAGEM.
 
@@ -104,9 +103,18 @@ export const analyzeImage = async (base64Image: string): Promise<AnalysisResult>
       * Se for uma refeição: baseie-se nos ingredientes visíveis.
       * Se for um produto (ex: caixa de Nescau): Estime com base em uma porção padrão (ex: 2 colheres de sopa ou 200ml preparado) ou na embalagem inteira se for um snack individual. Especifique na 'quantity' qual foi a base (ex: "Porção de 20g").
     - Analise com precisão técnica.
-    - Sugira harmonizações ou alternativas saudáveis nas 'suggestions'.
+    - Sugira harmonizações ou alternativas saudáveis nas 'suggestions'.`;
 
-    Responda estritamente no formato JSON solicitado.`
+  if (userContext) {
+    promptText += `\n\nCONTEXTO ADICIONAL FORNECIDO PELO USUÁRIO: "${userContext}". 
+    Use esta informação para ajudar a identificar ingredientes que podem não estar visíveis ou clarificar o que é o prato. 
+    No entanto, se a descrição do usuário contradizer completamente a imagem visual (ex: usuário diz que é salada, mas a foto é de um hambúrguer), confie na imagem e mencione a discrepância no feedback.`;
+  }
+
+  promptText += `\nResponda estritamente no formato JSON solicitado.`;
+
+  const textPart = {
+    text: promptText
   };
 
   try {
