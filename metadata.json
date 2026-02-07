@@ -1,0 +1,7 @@
+{
+  "name": "Flavos Healthy",
+  "description": "An innovative AI-powered application that allows users to measure food calories with high precision by simply taking a photo. It provides instant analysis, nutritional feedback, and healthy meal suggestions.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
