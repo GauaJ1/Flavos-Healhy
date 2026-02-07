@@ -127,9 +127,19 @@ export const analyzeImage = async (base64Image: string, userContext?: string): P
       }
     });
 
-    const jsonText = response.text.trim();
-    const result = JSON.parse(jsonText) as AnalysisResult;
-    return result;
+    const jsonText = response && typeof response.text === 'string' ? response.text.trim() : '';
+    if (!jsonText) {
+      console.error('Empty or invalid response from Gemini API:', response);
+      throw new Error('Resposta inválida do modelo. Tente novamente.');
+    }
+
+    try {
+      const result = JSON.parse(jsonText) as AnalysisResult;
+      return result;
+    } catch (parseError) {
+      console.error('Failed to parse model JSON response:', parseError, jsonText);
+      throw new Error('Resposta do modelo em formato inesperado. Tente novamente.');
+    }
 
   } catch (error) {
     console.error("Error calling Gemini API:", error);
