@@ -6,12 +6,13 @@ import ImageUploader from './components/ImageUploader';
 import AnalysisView from './components/AnalysisView';
 import LoadingView from './components/LoadingView';
 import TutorialModal from './components/TutorialModal';
+import ImagePreview from './components/ImagePreview';
 import { CameraIcon, ChartBarIcon } from './components/icons';
 import HistoryView from './components/HistoryView';
 import CameraView from './components/CameraView';
 import { AnimatePresence, motion } from 'framer-motion';
 
-type View = 'upload' | 'analysis' | 'history' | 'camera';
+type View = 'upload' | 'preview' | 'analysis' | 'history' | 'camera';
 
 const App: React.FC = () => {
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
@@ -53,11 +54,15 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const handleImageAnalysis = useCallback(async (imageFile: File) => {
+  const handleAnalysisStart = useCallback(async (imageFile: File, userDescription: string) => {
     setIsLoading(true);
     setError(null);
     setAnalysisResult(null);
-    setView('upload'); // Keep on upload view but show loading overlay or transition
+    
+    // Switch to loading view immediately
+    // Note: We use 'upload' view combined with isLoading=true to show LoadingView
+    // or we can handle it directly in renderContent
+    setView('upload'); 
 
     try {
       const reader = new FileReader();
@@ -65,7 +70,8 @@ const App: React.FC = () => {
       reader.onload = async () => {
         try {
           const base64Image = (reader.result as string).split(',')[1];
-          const result = await analyzeImage(base64Image);
+          // Pass the user description to the service
+          const result = await analyzeImage(base64Image, userDescription);
           setAnalysisResult(result);
           addHistoryEntry({
             id: Date.now(),
@@ -93,7 +99,14 @@ const App: React.FC = () => {
 
   const handleImageSelected = (file: File) => {
     setSelectedImage(file);
-    handleImageAnalysis(file);
+    // Instead of analyzing immediately, go to preview
+    setView('preview');
+  };
+  
+  const handleConfirmAnalysis = (description: string) => {
+    if (selectedImage) {
+      handleAnalysisStart(selectedImage, description);
+    }
   };
   
   const resetApp = () => {
@@ -147,6 +160,24 @@ const App: React.FC = () => {
              <CameraView onCapture={handleImageSelected} onClose={() => setView('upload')} />
           </motion.div>
         );
+      case 'preview':
+        return (
+            <motion.div
+                key="preview"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 1.05 }}
+                className="w-full flex flex-col items-center justify-center flex-grow"
+            >
+                {selectedImage && (
+                    <ImagePreview 
+                        imageFile={selectedImage} 
+                        onCancel={resetApp} 
+                        onAnalyze={handleConfirmAnalysis} 
+                    />
+                )}
+            </motion.div>
+        );
       case 'analysis':
         return (
           <motion.div 
@@ -198,7 +229,6 @@ const App: React.FC = () => {
             <div className="flex items-center gap-3">
               <div className="relative">
                   <div className="absolute inset-0 bg-emerald-500 blur-lg opacity-20 rounded-full"></div>
-                  {/* Image tag simplified. Ensure logo.png is in your public folder and committed to Git! */}
                   <img 
                     src="/logo.png" 
                     alt="Flavos" 
@@ -218,7 +248,7 @@ const App: React.FC = () => {
       </main>
 
       {/* Hide Footer in Camera Mode */}
-      {view !== 'camera' && (
+      {view !== 'camera' && view !== 'preview' && !isLoading && (
         <footer className="bg-gray-900/80 backdrop-blur-lg shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.3)] w-full sticky bottom-0 z-20 md:hidden border-t border-gray-800/50">
           <nav className="flex justify-around p-2">
             <button 
