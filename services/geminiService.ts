@@ -43,6 +43,10 @@ const responseSchema = {
           fat: {
             type: Type.NUMBER,
             description: 'Gordura em gramas.'
+          },
+          micronutrients: {
+            type: Type.STRING,
+            description: 'Micronutrientes e minerais notáveis (ex: Ferro, Cálcio, Vitamina C, Fibras). Se não houver destaque, deixe vazio.'
           }
         },
         required: ['name', 'calories', 'quantity', 'carbohydrates', 'protein', 'fat']
@@ -98,12 +102,11 @@ export const analyzeImage = async (base64Image: string, userContext?: string): P
     - No 'feedback', explique que o Flavos Healthy analisa apenas alimentos reais ou produtos alimentícios (inclusive embalagens).
 
     Se a imagem for aceita (Comida ou Produto):
-    - Identifique o alimento. Se for um produto embalado, leia o rótulo ou identifique a marca/tipo visualmente.
-    - Estime as calorias:
-      * Se for uma refeição: baseie-se nos ingredientes visíveis.
-      * Se for um produto (ex: caixa de Nescau): Estime com base em uma porção padrão (ex: 2 colheres de sopa ou 200ml preparado) ou na embalagem inteira se for um snack individual. Especifique na 'quantity' qual foi a base (ex: "Porção de 20g").
-    - Analise com precisão técnica.
-    - Sugira harmonizações ou alternativas saudáveis nas 'suggestions'.`;
+    - Identifique o alimento com a MAIOR PRECISÃO POSSÍVEL.
+    - Estime as quantidades de forma EXTREMAMENTE PRECISA (ex: 150g, 2 colheres de sopa cheias, 1 unidade média de 120g).
+    - Estime as calorias e macronutrientes com base nessas quantidades exatas.
+    - Identifique micronutrientes importantes presentes no alimento (ex: Ferro no feijão, Vitamina C na laranja, Cálcio no leite) e preencha o campo 'micronutrients'.
+    - Nas 'suggestions' (Dicas do Chef), seja REALISTA e PRÁTICO. Baseie-se no prato ATUAL. NÃO peça para o usuário trocar o que ele já está comendo (ex: não peça para trocar arroz branco por integral se ele já está comendo o branco). Em vez disso, sugira ADIÇÕES FÁCEIS e ACESSÍVEIS que a maioria das pessoas tem em casa (ex: adicionar uma folha de alface, um ovo cozido, um fio de azeite, sementes, tomate) para melhorar o valor nutricional da refeição que já está ali.`;
 
   if (userContext) {
     promptText += `\n\nCONTEXTO ADICIONAL FORNECIDO PELO USUÁRIO: "${userContext}". 
@@ -127,19 +130,9 @@ export const analyzeImage = async (base64Image: string, userContext?: string): P
       }
     });
 
-    const jsonText = response && typeof response.text === 'string' ? response.text.trim() : '';
-    if (!jsonText) {
-      console.error('Empty or invalid response from Gemini API:', response);
-      throw new Error('Resposta inválida do modelo. Tente novamente.');
-    }
-
-    try {
-      const result = JSON.parse(jsonText) as AnalysisResult;
-      return result;
-    } catch (parseError) {
-      console.error('Failed to parse model JSON response:', parseError, jsonText);
-      throw new Error('Resposta do modelo em formato inesperado. Tente novamente.');
-    }
+    const jsonText = response.text.trim();
+    const result = JSON.parse(jsonText) as AnalysisResult;
+    return result;
 
   } catch (error) {
     console.error("Error calling Gemini API:", error);

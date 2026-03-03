@@ -5,6 +5,7 @@ export interface FoodItem {
   carbohydrates: number;
   protein: number;
   fat: number;
+  micronutrients?: string;
 }
 
 export interface AnalysisResult {

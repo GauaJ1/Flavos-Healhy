@@ -32,17 +32,31 @@ const MacroBar: React.FC<{ label: string; value: number; total: number; color: s
 const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyzeAnother }) => {
   const imageUrl = imageFile ? URL.createObjectURL(imageFile) : '';
 
-  const handleShare = () => {
+  const handleShare = async () => {
     const shareText = `Acabei de analisar minha refeição com o Flavos Healthy! Teve cerca de ${result.totalCalories} calorias. O app identificou: ${result.foods.map(f => f.name).join(', ')}.`;
-    if (navigator.share) {
-      navigator.share({
-        title: 'Minha Análise de Refeição',
-        text: shareText,
-      }).catch(console.error);
-    } else {
-      navigator.clipboard.writeText(shareText).then(() => {
+    
+    try {
+      if (navigator.share) {
+        const shareData: ShareData = {
+          title: 'Minha Análise de Refeição',
+          text: shareText,
+        };
+
+        if (imageFile && navigator.canShare) {
+          // Create a new file with a safe name to ensure it can be shared
+          const fileToShare = new File([imageFile], 'refeicao.jpg', { type: imageFile.type });
+          if (navigator.canShare({ files: [fileToShare] })) {
+            shareData.files = [fileToShare];
+          }
+        }
+
+        await navigator.share(shareData);
+      } else {
+        await navigator.clipboard.writeText(shareText);
         alert('Resumo da refeição copiado para a área de transferência!');
-      });
+      }
+    } catch (error) {
+      console.error('Error sharing:', error);
     }
   };
 
@@ -181,11 +195,19 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
                       </div>
                       
                       {/* Visual Macros */}
-                      <div className="grid grid-cols-3 gap-4">
+                      <div className="grid grid-cols-3 gap-4 mb-3">
                           <MacroBar label="Carb" value={food.carbohydrates} total={totalMacros} color="bg-blue-400" />
                           <MacroBar label="Prot" value={food.protein} total={totalMacros} color="bg-emerald-400" />
                           <MacroBar label="Gord" value={food.fat} total={totalMacros} color="bg-yellow-400" />
                       </div>
+                      
+                      {/* Micronutrients */}
+                      {food.micronutrients && (
+                        <div className="mt-3 pt-3 border-t border-gray-700/50">
+                          <p className="text-xs text-gray-400 font-medium mb-1">Micronutrientes & Minerais:</p>
+                          <p className="text-sm text-gray-300">{food.micronutrients}</p>
+                        </div>
+                      )}
                     </motion.div>
                   );
                 })}
