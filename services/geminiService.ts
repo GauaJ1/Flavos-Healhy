@@ -122,7 +122,7 @@ export const analyzeImage = async (base64Image: string, userContext?: string): P
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-pro',
+      model: 'gemini-3.1-flash-lite-preview',
       contents: { parts: [imagePart, textPart] },
       config: {
         responseMimeType: "application/json",
