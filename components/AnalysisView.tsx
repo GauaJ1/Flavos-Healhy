@@ -73,7 +73,21 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
   };
 
   const handleShare = async () => {
-    const shareText = `Acabei de analisar minha refeição com o Flavos Healthy! Teve cerca de ${finalCalories} calorias. O app identificou: ${result.foods.map(f => f.name).join(', ')}.`;
+    const totalCarbs = Math.round(result.foods.reduce((sum, food) => sum + food.carbohydrates, 0));
+    const totalProtein = Math.round(result.foods.reduce((sum, food) => sum + food.protein, 0));
+    
+    let shareText = `Acabei de analisar minha refeição com o Flavos Healthy! 🥗\n\n`;
+    shareText += `📊 Estimativa: ${finalCalories} kcal\n`;
+    shareText += `💪 Proteínas: ${totalProtein}g | 🍞 Carbos: ${totalCarbs}g\n`;
+    shareText += `🔋 Saciedade: ${result.nutritionalSummary.satietyEstimate?.toUpperCase() || 'MÉDIA'}\n`;
+    
+    if (result.nutritionalSummary.possiblePositiveComponents?.length > 0) {
+      shareText += `✨ Destaques: ${result.nutritionalSummary.possiblePositiveComponents.slice(0, 2).join(', ')}\n`;
+    }
+    
+    shareText += `\nO app identificou: ${result.foods.map(f => f.name).join(', ')}.\n`;
+    shareText += `Faça sua análise também! 📸✨`;
+
     try {
       if (navigator.share) {
         const shareData: ShareData = { title: 'Minha Análise de Refeição', text: shareText };
