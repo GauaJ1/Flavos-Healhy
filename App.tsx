@@ -73,12 +73,6 @@ const App: React.FC = () => {
           // Pass the user description to the service
           const result = await analyzeImage(base64Image, userDescription);
           setAnalysisResult(result);
-          addHistoryEntry({
-            id: Date.now(),
-            date: new Date().toISOString(),
-            totalCalories: result.totalCalories,
-            foods: result.foods,
-          });
           setView('analysis');
         } catch (err) {
           setError('Falha ao analisar a imagem. Por favor, tente uma foto mais nítida ou diferente.');
@@ -187,7 +181,21 @@ const App: React.FC = () => {
             exit={{ opacity: 0, x: -20 }}
             className="w-full flex justify-center"
           >
-            {analysisResult && <AnalysisView result={analysisResult} imageFile={selectedImage} onAnalyzeAnother={resetApp} />}
+            {analysisResult && (
+          <AnalysisView 
+            result={analysisResult} 
+            imageFile={selectedImage} 
+            onAnalyzeAnother={resetApp} 
+            onSave={(finalResult, finalCalories) => {
+              addHistoryEntry({
+                id: Date.now(),
+                date: new Date().toISOString(),
+                totalCalories: finalCalories,
+                foods: finalResult.foods,
+              });
+            }}
+          />
+        )}
           </motion.div>
         );
       case 'history':

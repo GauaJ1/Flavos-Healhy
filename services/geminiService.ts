@@ -1,75 +1,91 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import type { AnalysisResult } from '../types';
 
-const ai = new GoogleGenAI({ apiKey: "AIzaSyDMBJYne3II26OKIZrGimogMbzPyYDEjls"});
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 const responseSchema = {
   type: Type.OBJECT,
   properties: {
-    isRealFood: {
-      type: Type.BOOLEAN,
-      description: 'Defina como true se a imagem for uma fotografia real de comida, refeição ou PRODUTO ALIMENTÍCIO (embalagens, caixas, latas, garrafas). Defina como false para desenhos, telas de computador, pessoas ou objetos não comestíveis.'
+    analysisMetadata: {
+      type: Type.OBJECT,
+      properties: {
+        isRealFood: { type: Type.BOOLEAN, description: 'True se for foto real de comida/produto.' },
+        confidence: { type: Type.STRING, description: '"alta", "media" ou "baixa".' },
+        isMixedDish: { type: Type.BOOLEAN },
+        isPackagedFood: { type: Type.BOOLEAN },
+        uncertaintyReasons: { type: Type.ARRAY, items: { type: Type.STRING } },
+        requiresFollowUp: { type: Type.BOOLEAN, description: 'True se a confiança for baixa, prato misturado, ou variância calórica > 200kcal.' },
+        followUpQuestions: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              id: { type: Type.STRING },
+              question: { type: Type.STRING },
+              type: { type: Type.STRING, description: '"boolean" ou "fraction"' },
+              calorieImpact: { type: Type.INTEGER, description: 'Calorias a adicionar se a resposta for sim (ex: 90 para óleo)' }
+            },
+            required: ['id', 'question', 'type', 'calorieImpact']
+          }
+        }
+      },
+      required: ['isRealFood', 'confidence', 'isMixedDish', 'isPackagedFood', 'uncertaintyReasons', 'requiresFollowUp', 'followUpQuestions']
     },
-    totalCalories: {
-      type: Type.INTEGER,
-      description: 'O total de calorias. Se isRealFood for false, deve ser 0.'
+    nutritionalSummary: {
+      type: Type.OBJECT,
+      properties: {
+        baseCalories: { type: Type.INTEGER, description: 'Calorias apenas dos itens 100% visíveis e crus/cozidos sem adição de gordura invisível.' },
+        maxPossibleCalories: { type: Type.INTEGER, description: 'baseCalories + pior cenário dos ingredientes ocultos (ex: +óleo, +açúcar).' },
+        calorieDensity: { type: Type.STRING, description: '"baixa", "media" ou "alta"' },
+        satietyEstimate: { type: Type.STRING, description: '"baixa", "media" ou "alta"' },
+        possiblePositiveComponents: { type: Type.ARRAY, items: { type: Type.STRING } },
+        possibleAttentionPoints: { type: Type.ARRAY, items: { type: Type.STRING } }
+      },
+      required: ['baseCalories', 'maxPossibleCalories', 'calorieDensity', 'satietyEstimate', 'possiblePositiveComponents', 'possibleAttentionPoints']
     },
     foods: {
       type: Type.ARRAY,
-      description: 'Lista de alimentos identificados. Se isRealFood for false, envie uma lista vazia.',
       items: {
         type: Type.OBJECT,
         properties: {
-          name: {
-            type: Type.STRING,
-            description: 'O nome específico do alimento ou produto (ex: Leite Integral, Biscoito Recheado).'
-          },
-          calories: {
-            type: Type.INTEGER,
-            description: 'A contagem de calorias estimada.'
-          },
-          quantity: {
-            type: Type.STRING,
-            description: 'A quantidade estimada (ex: 100g, 1 caixa, 1 copo, 200ml).'
-          },
-          carbohydrates: {
-            type: Type.NUMBER,
-            description: 'Carboidratos em gramas.'
-          },
-          protein: {
-            type: Type.NUMBER,
-            description: 'Proteína em gramas.'
-          },
-          fat: {
-            type: Type.NUMBER,
-            description: 'Gordura em gramas.'
-          },
-          micronutrients: {
-            type: Type.STRING,
-            description: 'Micronutrientes e minerais notáveis (ex: Ferro, Cálcio, Vitamina C, Fibras). Se não houver destaque, deixe vazio.'
-          }
+          id: { type: Type.STRING },
+          name: { type: Type.STRING },
+          calories: { type: Type.INTEGER },
+          estimatedAmount: { type: Type.NUMBER },
+          unit: { type: Type.STRING },
+          estimatedWeightGrams: { type: Type.INTEGER },
+          portionDescription: { type: Type.STRING },
+          carbohydrates: { type: Type.NUMBER },
+          protein: { type: Type.NUMBER },
+          fat: { type: Type.NUMBER },
+          micronutrients: { type: Type.STRING },
+          source: { type: Type.STRING, description: '"visible", "inferred_from_context" ou "estimated_recipe_component"' },
+          confidence: { type: Type.STRING },
+          preparationMethod: { type: Type.STRING },
+          consumedFraction: { type: Type.NUMBER, description: 'Sempre 1.0 inicialmente' },
+          healthHighlights: { type: Type.ARRAY, items: { type: Type.STRING } },
+          attentionHighlights: { type: Type.ARRAY, items: { type: Type.STRING } },
+          processingLevel: { type: Type.STRING },
+          possibleAddedSugars: { type: Type.BOOLEAN },
+          possibleAddedFats: { type: Type.BOOLEAN },
+          possibleExcessSodium: { type: Type.BOOLEAN },
+          possibleIndustrializedSauces: { type: Type.BOOLEAN }
         },
-        required: ['name', 'calories', 'quantity', 'carbohydrates', 'protein', 'fat']
+        required: ['id', 'name', 'calories', 'estimatedAmount', 'unit', 'estimatedWeightGrams', 'portionDescription', 'carbohydrates', 'protein', 'fat', 'micronutrients', 'source', 'confidence', 'preparationMethod', 'consumedFraction', 'healthHighlights', 'attentionHighlights', 'processingLevel', 'possibleAddedSugars', 'possibleAddedFats', 'possibleExcessSodium', 'possibleIndustrializedSauces']
       }
     },
-    feedback: {
-        type: Type.STRING,
-        description: 'Se isRealFood for false, explique polidamente que o app só analisa fotos reais de alimentos ou produtos alimentícios. Se for true, dê o feedback nutricional.'
-    },
+    hiddenIngredientsPossible: { type: Type.ARRAY, items: { type: Type.STRING } },
+    feedback: { type: Type.STRING },
     suggestions: {
-        type: Type.ARRAY,
-        description: 'Sugestões práticas de saúde ou consumo. Se isRealFood for false, envie uma lista vazia.',
-        items: {
-            type: Type.OBJECT,
-            properties: {
-                title: { type: Type.STRING },
-                details: { type: Type.STRING }
-            },
-            required: ['title', 'details']
-        }
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: { title: { type: Type.STRING }, details: { type: Type.STRING } },
+        required: ['title', 'details']
+      }
     }
   },
-  required: ['isRealFood', 'totalCalories', 'foods', 'feedback', 'suggestions']
+  required: ['analysisMetadata', 'nutritionalSummary', 'foods', 'hiddenIngredientsPossible', 'feedback', 'suggestions']
 };
 
 export const analyzeImage = async (base64Image: string, userContext?: string): Promise<AnalysisResult> => {
@@ -80,45 +96,41 @@ export const analyzeImage = async (base64Image: string, userContext?: string): P
     }
   };
 
-  let promptText = `Você é um nutricionista rigoroso e um especialista em visão computacional.
+  let promptText = `Você é um arquiteto de produto nutricional e especialista em visão computacional.
     
     SUA PRIMEIRA E MAIS IMPORTANTE TAREFA É A VALIDAÇÃO DA IMAGEM.
+    Se não for comida real ou produto alimentício, defina analysisMetadata.isRealFood = false e zere as calorias.
 
-    CRITÉRIOS DE REJEIÇÃO (isRealFood = false):
-    1. Desenhos, ilustrações, cartoons, animes ou arte digital.
-    2. Imagens de telas (fotos de monitores, TVs ou celulares exibindo comida).
-    3. Objetos que NÃO são comida nem produtos alimentícios (carros, pessoas, paisagens, eletrônicos, móveis, animais vivos).
-    4. Imagens excessivamente borradas onde nada é distinguível.
+    Se for comida real, siga esta pipeline rigorosa:
     
-    CRITÉRIOS DE ACEITE (isRealFood = true):
-    1. Fotografias reais de refeições prontas (pratos, lanches).
-    2. Fotografias reais de PRODUTOS ALIMENTÍCIOS e EMBALAGENS (ex: caixas de leite, latas de achocolatado (Nescau, Toddy), pacotes de biscoito, sacos de salgadinho, garrafas de suco/refrigerante).
-    3. Fotografias reais de ingredientes crus (frutas, legumes, carnes, ovos).
+    1. FASE DE INFERÊNCIA E INCERTEZA (analysisMetadata):
+       - Defina se é prato misturado (isMixedDish) ou produto embalado (isPackagedFood).
+       - Liste os motivos de incerteza (uncertaintyReasons).
+       - REGRA DE REFINAMENTO: Se a confiança for 'baixa', for um prato misturado, ou a variância calórica for > 200kcal, defina requiresFollowUp = true.
+       - Se requiresFollowUp = true, crie followUpQuestions (ex: "Foi adicionado óleo no preparo?" com calorieImpact = 90, ou "Quanto você comeu?" com type="fraction" e calorieImpact = 0).
 
-    Se a imagem for rejeitada:
-    - Defina 'isRealFood' como false.
-    - Defina 'totalCalories' como 0.
-    - Deixe a lista 'foods' vazia.
-    - No 'feedback', explique que o Flavos Healthy analisa apenas alimentos reais ou produtos alimentícios (inclusive embalagens).
+    2. FASE DE CÁLCULO CALÓRICO (nutritionalSummary):
+       - baseCalories: Apenas itens 100% visíveis e crus/cozidos SEM adição de gordura invisível. Seja conservador.
+       - maxPossibleCalories: baseCalories + pior cenário dos ingredientes ocultos (ex: +1 colher de óleo, +queijo no molho).
+       - Liste componentes positivos e pontos de atenção gerais.
 
-    Se a imagem for aceita (Comida ou Produto):
-    - Identifique o alimento com a MAIOR PRECISÃO POSSÍVEL.
-    - Estime as quantidades de forma EXTREMAMENTE PRECISA (ex: 150g, 2 colheres de sopa cheias, 1 unidade média de 120g).
-    - Estime as calorias e macronutrientes com base nessas quantidades exatas.
-    - Identifique micronutrientes importantes presentes no alimento (ex: Ferro no feijão, Vitamina C na laranja, Cálcio no leite) e preencha o campo 'micronutrients'.
-    - Nas 'suggestions' (Dicas do Chef), seja REALISTA e PRÁTICO. Baseie-se no prato ATUAL. NÃO peça para o usuário trocar o que ele já está comendo (ex: não peça para trocar arroz branco por integral se ele já está comendo o branco). Em vez disso, sugira ADIÇÕES FÁCEIS e ACESSÍVEIS que a maioria das pessoas tem em casa (ex: adicionar uma folha de alface, um ovo cozido, um fio de azeite, sementes, tomate) para melhorar o valor nutricional da refeição que já está ali.`;
+    3. ESTRUTURAÇÃO DOS ALIMENTOS (foods):
+       - Para cada alimento, defina id, nome, quantidade, macros.
+       - Defina a origem (source): 'visible', 'inferred_from_context', 'estimated_recipe_component'.
+       - SEPARE O NATURAL DO ADICIONADO: Marque as flags 'possibleAddedSugars', 'possibleAddedFats', etc., como true APENAS se forem adicionados/industriais.
+       - Destaque micronutrientes. Se não houver, escreva "Sem destaques".
+
+    4. FEEDBACK E SUGESTÕES:
+       - Use tom profissional, amigável e transparente. NUNCA use "faz mal" ou "ruim".
+       - Sugira adições fáceis para melhorar o prato atual.`;
 
   if (userContext) {
-    promptText += `\n\nCONTEXTO ADICIONAL FORNECIDO PELO USUÁRIO: "${userContext}". 
-    Use esta informação para ajudar a identificar ingredientes que podem não estar visíveis ou clarificar o que é o prato. 
-    No entanto, se a descrição do usuário contradizer completamente a imagem visual (ex: usuário diz que é salada, mas a foto é de um hambúrguer), confie na imagem e mencione a discrepância no feedback.`;
+    promptText += `\n\nCONTEXTO ADICIONAL FORNECIDO PELO USUÁRIO: "${userContext}". Use para refinar a análise.`;
   }
 
   promptText += `\nResponda estritamente no formato JSON solicitado.`;
 
-  const textPart = {
-    text: promptText
-  };
+  const textPart = { text: promptText };
 
   try {
     const response = await ai.models.generateContent({
@@ -131,9 +143,7 @@ export const analyzeImage = async (base64Image: string, userContext?: string): P
     });
 
     const jsonText = response.text.trim();
-    const result = JSON.parse(jsonText) as AnalysisResult;
-    return result;
-
+    return JSON.parse(jsonText) as AnalysisResult;
   } catch (error) {
     console.error("Error calling Gemini API:", error);
     throw new Error("Falha ao processar a imagem. Tente novamente.");

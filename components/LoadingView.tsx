@@ -43,7 +43,7 @@ const LoadingView: React.FC = () => {
             transition={{ duration: 2, repeat: Infinity }}
             className="relative z-10 w-16 h-16 flex items-center justify-center bg-gray-900 rounded-full border border-gray-800"
         >
-             <img src="/logo.png" alt="Loading" className="w-10 h-10 object-contain" />
+             <img src="./public/logo.png" alt="Loading" className="w-10 h-10 object-contain" />
         </motion.div>
       </div>
 

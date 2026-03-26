@@ -5,7 +5,7 @@ const CACHE_NAME = 'flavos-healthy-cache-v3';
 const urlsToCache = [
   '/',
   '/index.html',
-  '/logo.png',
+  // '/logo.png', // Removed to prevent SW failure if file is missing in build
 ];
 
 // Install a service worker
