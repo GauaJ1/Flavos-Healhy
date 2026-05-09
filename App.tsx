@@ -2,13 +2,11 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { analyzeImage } from './services/geminiService';
 import type { AnalysisResult } from './types';
 import { useMealHistory } from './hooks/useMealHistory';
-import { useHealthSync } from './hooks/useHealthSync';
 import ImageUploader from './components/ImageUploader';
 import AnalysisView from './components/AnalysisView';
 import LoadingView from './components/LoadingView';
 import TutorialModal from './components/TutorialModal';
 import ImagePreview from './components/ImagePreview';
-import HealthSyncToggle from './components/HealthSyncToggle';
 import { CameraIcon, ChartBarIcon } from './components/icons';
 import HistoryView from './components/HistoryView';
 import CameraView from './components/CameraView';
@@ -32,7 +30,6 @@ const App: React.FC = () => {
   const [view, setView] = useState<View>('upload');
 
   const { history, addHistoryEntry, removeHistoryEntry } = useMealHistory();
-  const healthSync = useHealthSync();
   
   useEffect(() => {
     const root = window.document.documentElement;
@@ -204,8 +201,6 @@ const App: React.FC = () => {
                 foods: finalResult.foods,
               };
               addHistoryEntry(entry);
-              // Sincronizar com Samsung Health automaticamente
-              healthSync.syncMealEntry(entry);
             }}
           />
         )}
@@ -233,19 +228,6 @@ const App: React.FC = () => {
             exit={{ opacity: 0, scale: 1.05 }}
             className="w-full flex flex-col items-center justify-center flex-grow"
           >
-            {/* Samsung Health Sync Toggle — só aparece no Android nativo */}
-            <HealthSyncToggle
-              isNative={healthSync.isNative}
-              isAvailable={healthSync.isAvailable}
-              hasPermissions={healthSync.hasPermissions}
-              isSyncEnabled={healthSync.isSyncEnabled}
-              isSyncing={healthSync.isSyncing}
-              lastSyncMessage={healthSync.lastSyncMessage}
-              lastSyncError={healthSync.lastSyncError}
-              onEnable={healthSync.enableSync}
-              onDisable={healthSync.disableSync}
-              onClearMessages={healthSync.clearMessages}
-            />
             <ImageUploader onImageSelected={handleImageSelected} onTakePhoto={() => setView('camera')} />
           </motion.div>
         );
