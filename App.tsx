@@ -2,17 +2,26 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { analyzeImage } from './services/geminiService';
 import type { AnalysisResult } from './types';
 import { useMealHistory } from './hooks/useMealHistory';
+import { useHealthSync } from './hooks/useHealthSync';
 import ImageUploader from './components/ImageUploader';
 import AnalysisView from './components/AnalysisView';
 import LoadingView from './components/LoadingView';
 import TutorialModal from './components/TutorialModal';
 import ImagePreview from './components/ImagePreview';
+import HealthSyncToggle from './components/HealthSyncToggle';
 import { CameraIcon, ChartBarIcon } from './components/icons';
 import HistoryView from './components/HistoryView';
 import CameraView from './components/CameraView';
 import { AnimatePresence, motion } from 'framer-motion';
 
 type View = 'upload' | 'preview' | 'analysis' | 'history' | 'camera';
+
+const MAINTENANCE_DOMAINS = [
+  'flavos-healhy.vercel.app',
+  'flavos-healhy-kaua-jorges-projects.vercel.app',
+  'flavos-healhy-git-main-kaua-jorges-projects.vercel.app',
+  'healthy.flavoscompany.xyz'
+];
 
 const App: React.FC = () => {
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
@@ -23,6 +32,7 @@ const App: React.FC = () => {
   const [view, setView] = useState<View>('upload');
 
   const { history, addHistoryEntry, removeHistoryEntry } = useMealHistory();
+  const healthSync = useHealthSync();
   
   useEffect(() => {
     const root = window.document.documentElement;
@@ -187,12 +197,15 @@ const App: React.FC = () => {
             imageFile={selectedImage} 
             onAnalyzeAnother={resetApp} 
             onSave={(finalResult, finalCalories) => {
-              addHistoryEntry({
+              const entry = {
                 id: Date.now(),
                 date: new Date().toISOString(),
                 totalCalories: finalCalories,
                 foods: finalResult.foods,
-              });
+              };
+              addHistoryEntry(entry);
+              // Sincronizar com Samsung Health automaticamente
+              healthSync.syncMealEntry(entry);
             }}
           />
         )}
@@ -220,11 +233,67 @@ const App: React.FC = () => {
             exit={{ opacity: 0, scale: 1.05 }}
             className="w-full flex flex-col items-center justify-center flex-grow"
           >
+            {/* Samsung Health Sync Toggle — só aparece no Android nativo */}
+            <HealthSyncToggle
+              isNative={healthSync.isNative}
+              isAvailable={healthSync.isAvailable}
+              hasPermissions={healthSync.hasPermissions}
+              isSyncEnabled={healthSync.isSyncEnabled}
+              isSyncing={healthSync.isSyncing}
+              lastSyncMessage={healthSync.lastSyncMessage}
+              lastSyncError={healthSync.lastSyncError}
+              onEnable={healthSync.enableSync}
+              onDisable={healthSync.disableSync}
+              onClearMessages={healthSync.clearMessages}
+            />
             <ImageUploader onImageSelected={handleImageSelected} onTakePhoto={() => setView('camera')} />
           </motion.div>
         );
     }
   };
+
+  const isMaintenanceMode = MAINTENANCE_DOMAINS.includes(window.location.hostname);
+
+  if (isMaintenanceMode) {
+    return (
+      <div className="min-h-screen bg-[#111827] font-sans text-gray-200 flex flex-col bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-gray-800 via-gray-900 to-black">
+        <header className="bg-gray-900/60 backdrop-blur-md shadow-lg w-full sticky top-0 z-20 border-b border-gray-800/50">
+          <div className="container mx-auto px-4 py-4 flex justify-between items-center">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                  <div className="absolute inset-0 bg-emerald-500 blur-lg opacity-20 rounded-full"></div>
+                  <img 
+                    src="/logo.png" 
+                    alt="Flavos" 
+                    className="w-8 h-8 relative z-10 object-contain" 
+                  />
+              </div>
+              <h1 className="text-xl md:text-2xl font-bold bg-gradient-to-r from-emerald-400 to-teal-500 bg-clip-text text-transparent">Flavos Healthy</h1>
+            </div>
+          </div>
+        </header>
+
+        <main className="flex-grow container mx-auto p-4 md:p-6 lg:p-8 flex flex-col items-center justify-center relative z-10">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="text-center p-8 md:p-12 bg-gray-800/50 backdrop-blur-md rounded-3xl shadow-xl w-full max-w-lg border border-gray-700/50 flex flex-col items-center"
+          >
+            <div className="w-20 h-20 bg-emerald-500/10 rounded-full flex items-center justify-center mb-6 border border-emerald-500/20">
+               <svg className="w-10 h-10 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+               </svg>
+            </div>
+            <h2 className="text-3xl font-bold text-white mb-4 tracking-tight">Em Manutenção</h2>
+            <p className="text-gray-300 text-lg leading-relaxed">
+              O Flavos Healthy está passando por atualizações no momento para trazer uma experiência ainda melhor. Voltaremos em breve!
+            </p>
+          </motion.div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#111827] font-sans text-gray-200 flex flex-col bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-gray-800 via-gray-900 to-black">
