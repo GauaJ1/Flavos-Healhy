@@ -1,7 +1,18 @@
-import React, { useState, useEffect } from 'react';
-import type { AnalysisResult } from '../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import type { AnalysisResult, FoodItem } from '../types';
 import { FlameIcon, LightBulbIcon, ShareIcon, PlusCircleIcon, XMarkIcon } from './icons';
 import { motion } from 'framer-motion';
+import NutritionScoreBadge from './NutritionScoreBadge';
+import DetailedNutritionPanel from './DetailedNutritionPanel';
+import ProcessingBreakdownComp from './ProcessingBreakdown';
+import MicronutrientPanel from './MicronutrientPanel';
+import NutritionalAlerts from './NutritionalAlerts';
+import PortionAdjuster from './PortionAdjuster';
+import { calculateNutritionScore, calculateProcessingBreakdown, aggregateMicronutrients, generateAlerts } from '../utils/nutritionScore';
+import { buildMealShareMessage } from '../utils/shareMessage';
+import { Capacitor } from '@capacitor/core';
+import { Share } from '@capacitor/share';
+import { Filesystem, Directory } from '@capacitor/filesystem';
 
 interface AnalysisViewProps {
   result: AnalysisResult;
@@ -35,8 +46,28 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
   
   const [isRefining, setIsRefining] = useState(result.analysisMetadata?.requiresFollowUp || false);
   const [answers, setAnswers] = useState<Record<string, any>>({});
+  const [adjustedFoods, setAdjustedFoods] = useState<FoodItem[]>(result.foods || []);
   const [finalCalories, setFinalCalories] = useState<number>(result.nutritionalSummary?.baseCalories || 0);
   const [hasSaved, setHasSaved] = useState(false);
+
+  // Recalcular quando porções mudam
+  const currentResult = useMemo(() => {
+    const r = { ...result, foods: adjustedFoods };
+    r.nutritionalSummary = { ...r.nutritionalSummary, baseCalories: adjustedFoods.reduce((s, f) => s + f.calories, 0) };
+    return r;
+  }, [result, adjustedFoods]);
+
+  const nutritionScore = useMemo(() => calculateNutritionScore(currentResult), [currentResult]);
+  const processingBreakdown = useMemo(() => calculateProcessingBreakdown(adjustedFoods), [adjustedFoods]);
+  const micronutrients = useMemo(() => aggregateMicronutrients(adjustedFoods), [adjustedFoods]);
+  const alerts = useMemo(() => generateAlerts(currentResult), [currentResult]);
+
+  const handlePortionAdjust = (index: number, adjusted: FoodItem) => {
+    const newFoods = [...adjustedFoods];
+    newFoods[index] = adjusted;
+    setAdjustedFoods(newFoods);
+    setFinalCalories(newFoods.reduce((s, f) => s + f.calories, 0));
+  };
 
   useEffect(() => {
     if (result.analysisMetadata && !result.analysisMetadata.requiresFollowUp && !hasSaved && result.analysisMetadata.isRealFood) {
@@ -73,37 +104,103 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
   };
 
   const handleShare = async () => {
-    const totalCarbs = Math.round(result.foods.reduce((sum, food) => sum + food.carbohydrates, 0));
-    const totalProtein = Math.round(result.foods.reduce((sum, food) => sum + food.protein, 0));
-    
-    let shareText = `Acabei de analisar minha refeição com o Flavos Healthy! 🥗\n\n`;
-    shareText += `📊 Estimativa: ${finalCalories} kcal\n`;
-    shareText += `💪 Proteínas: ${totalProtein}g | 🍞 Carbos: ${totalCarbs}g\n`;
-    shareText += `🔋 Saciedade: ${result.nutritionalSummary.satietyEstimate?.toUpperCase() || 'MÉDIA'}\n`;
-    
-    if (result.nutritionalSummary.possiblePositiveComponents?.length > 0) {
-      shareText += `✨ Destaques: ${result.nutritionalSummary.possiblePositiveComponents.slice(0, 2).join(', ')}\n`;
-    }
-    
-    shareText += `\nO app identificou: ${result.foods.map(f => f.name).join(', ')}.\n`;
-    shareText += `Faça sua análise também! 📸✨`;
+    const totalCarbs = adjustedFoods.reduce((sum, food) => sum + food.carbohydrates, 0);
+    const totalProtein = adjustedFoods.reduce((sum, food) => sum + food.protein, 0);
+    const totalFat = adjustedFoods.reduce((sum, food) => sum + food.fat, 0);
+    const totalFiber = adjustedFoods.reduce((sum, food) => sum + (food.fiber || 0), 0);
+
+    const shareText = buildMealShareMessage({
+      nutritionScore,
+      processingBreakdown,
+      adjustedFoods,
+      finalCalories,
+      macros: {
+        protein: totalProtein,
+        carbs: totalCarbs,
+        fat: totalFat,
+        fiber: totalFiber,
+      },
+      variant: 'default',
+    });
+
+    const shareTitle = 'Análise Nutricional — Flavos Healthy';
 
     try {
-      if (navigator.share) {
-        const shareData: ShareData = { title: 'Minha Análise de Refeição', text: shareText };
-        if (imageFile && navigator.canShare) {
-          const fileToShare = new File([imageFile], 'refeicao.jpg', { type: imageFile.type });
-          if (navigator.canShare({ files: [fileToShare] })) {
-            shareData.files = [fileToShare];
+      if (Capacitor.isNativePlatform()) {
+        let fileUrls: string[] = [];
+        
+        if (imageFile) {
+          try {
+            const reader = new FileReader();
+            reader.readAsDataURL(imageFile);
+            await new Promise<void>((resolve, reject) => {
+              reader.onload = async () => {
+                try {
+                  const base64Data = (reader.result as string).split(',')[1];
+                  const fileName = `flavos-analise-${Date.now()}.jpg`;
+                  const savedFile = await Filesystem.writeFile({
+                    path: fileName,
+                    data: base64Data,
+                    directory: Directory.Cache,
+                  });
+                  fileUrls.push(savedFile.uri);
+                  resolve();
+                } catch (e) {
+                  reject(e);
+                }
+              };
+              reader.onerror = reject;
+            });
+          } catch (e) {
+            console.error('Falha ao salvar imagem no cache do celular:', e);
           }
         }
-        await navigator.share(shareData);
-      } else {
-        await navigator.clipboard.writeText(shareText);
-        alert('Resumo da refeição copiado para a área de transferência!');
+
+        await Share.share({
+          title: shareTitle,
+          text: shareText,
+          files: fileUrls.length > 0 ? fileUrls : undefined,
+          dialogTitle: 'Compartilhe sua Análise'
+        });
+        return;
       }
+
+      // Lógica para Web (Mobile Browsers como Safari iOS e Chrome Android)
+      const isWebShareSupported = 'canShare' in navigator;
+      
+      if (imageFile && isWebShareSupported) {
+        // Safari do iOS exige o tipo MIME explícito, senão ele bloqueia o envio da imagem
+        const mimeType = imageFile.type || 'image/jpeg';
+        const fileToShare = new File([imageFile], 'analise-flavos.jpg', { type: mimeType });
+
+        if (navigator.canShare({ files: [fileToShare] })) {
+          await navigator.share({ 
+            title: shareTitle, 
+            text: shareText, 
+            files: [fileToShare] 
+          });
+          return;
+        }
+      }
+
+      // Fallback 1: Compartilhar apenas texto (Navegadores mais antigos)
+      if (navigator.share) {
+        await navigator.share({ title: shareTitle, text: shareText });
+        return;
+      }
+
+      // Fallback 2: Copiar para área de transferência (PC)
+      await navigator.clipboard.writeText(shareText);
+      alert('Análise copiada para a área de transferência!');
     } catch (error) {
-      console.error('Error sharing:', error);
+      if ((error as Error).name !== 'AbortError') {
+        try {
+          await navigator.clipboard.writeText(shareText);
+          alert('Análise copiada para a área de transferência!');
+        } catch {
+          console.error('Erro ao compartilhar:', error);
+        }
+      }
     }
   };
 
@@ -249,11 +346,26 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
           </div>
         </motion.div>
         
+        {/* Nutrition Score + Detailed Panel */}
+        <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <NutritionScoreBadge score={nutritionScore} />
+          <div className="space-y-4">
+            <DetailedNutritionPanel summary={currentResult.nutritionalSummary} />
+            <ProcessingBreakdownComp breakdown={processingBreakdown} />
+          </div>
+        </motion.div>
+
+        {/* Alerts + Micronutrients */}
+        <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <NutritionalAlerts alerts={alerts} />
+          <MicronutrientPanel estimates={micronutrients} />
+        </motion.div>
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <motion.div variants={itemVariants} className="lg:col-span-2 space-y-4">
               <h3 className="text-xl font-bold text-white px-2">Ingredientes Identificados</h3>
               <div className="space-y-3">
-                {result.foods.map((food, index) => {
+                {adjustedFoods.map((food, index) => {
                   const totalMacros = food.carbohydrates + food.protein + food.fat;
                   
                   const sourceLabels = {
@@ -304,6 +416,30 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
                           <MacroBar label="Carb" value={food.carbohydrates} total={totalMacros} color="bg-blue-400" />
                           <MacroBar label="Prot" value={food.protein} total={totalMacros} color="bg-emerald-400" />
                           <MacroBar label="Gord" value={food.fat} total={totalMacros} color="bg-yellow-400" />
+                      </div>
+
+                      {/* Nutritional details row */}
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        {food.fiber > 0 && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                            Fibra: {food.fiber}g
+                          </span>
+                        )}
+                        {food.sodium > 0 && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-300 border border-purple-500/20">
+                            Sódio: {food.sodium}mg
+                          </span>
+                        )}
+                        {food.saturatedFat > 0 && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-pink-500/10 text-pink-300 border border-pink-500/20">
+                            G. Sat: {food.saturatedFat}g
+                          </span>
+                        )}
+                        {food.addedSugar > 0 && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-300 border border-red-500/20">
+                            Açúcar add: {food.addedSugar}g
+                          </span>
+                        )}
                       </div>
                       
                       <div className="mt-4 pt-4 border-t border-gray-700/50 grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -367,6 +503,12 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
                           )}
                         </div>
                       </div>
+
+                      {/* Portion Adjuster */}
+                      <PortionAdjuster
+                        food={food}
+                        onAdjust={(adjusted) => handlePortionAdjust(index, adjusted)}
+                      />
                     </motion.div>
                   );
                 })}

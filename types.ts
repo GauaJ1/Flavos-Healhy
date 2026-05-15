@@ -23,6 +23,18 @@ export interface NutritionalSummary {
   satietyEstimate: 'baixa' | 'media' | 'alta';
   possiblePositiveComponents: string[];
   possibleAttentionPoints: string[];
+  // Novos campos — Painel Nutricional Detalhado
+  totalFiber: number;
+  totalSugar: number;
+  totalAddedSugar: number;
+  totalSodium: number;
+  totalSaturatedFat: number;
+}
+
+export interface MicronutrientEstimate {
+  name: string;
+  level: 'baixo' | 'moderado' | 'bom' | 'alto';
+  percentage: number; // 0-100, % da necessidade diária aproximada
 }
 
 export interface FoodItem {
@@ -36,7 +48,14 @@ export interface FoodItem {
   carbohydrates: number;
   protein: number;
   fat: number;
+  // Novos campos — Painel Nutricional Detalhado
+  fiber: number;
+  sugar: number;
+  addedSugar: number;
+  sodium: number;
+  saturatedFat: number;
   micronutrients?: string;
+  micronutrientEstimates?: MicronutrientEstimate[];
   source: 'visible' | 'inferred_from_context' | 'estimated_recipe_component';
   confidence: 'alta' | 'media' | 'baixa';
   preparationMethod: string;
@@ -49,6 +68,66 @@ export interface FoodItem {
   possibleExcessSodium: boolean;
   possibleIndustrializedSauces: boolean;
 }
+
+// ────────────────────────────────────────────────────────
+// Flavos Nutrition Score
+// ────────────────────────────────────────────────────────
+
+export type NutritionGrade = 'excelente' | 'boa' | 'moderada' | 'precisa_melhorar';
+
+export interface NutritionScoreBreakdown {
+  proteinScore: number;       // 0-20
+  fiberScore: number;         // 0-20
+  sugarPenalty: number;       // 0-20 (subtrai)
+  sodiumPenalty: number;      // 0-15 (subtrai)
+  macroBalance: number;       // 0-15
+  processingScore: number;    // 0-15
+  varietyBonus: number;       // 0-15
+}
+
+export interface NutritionScore {
+  total: number;              // 0-100
+  grade: NutritionGrade;
+  breakdown: NutritionScoreBreakdown;
+  explanation: string;        // Explicação em linguagem simples
+}
+
+// ────────────────────────────────────────────────────────
+// Classificação de Qualidade Alimentar
+// ────────────────────────────────────────────────────────
+
+export interface ProcessingBreakdown {
+  inNatura: number;             // Percentual
+  minimamenteProcessado: number;
+  processado: number;
+  ultraprocessado: number;
+  indeterminado: number;
+}
+
+// ────────────────────────────────────────────────────────
+// Ajuste de Porções
+// ────────────────────────────────────────────────────────
+
+export type PortionSize = 'pequeno' | 'medio' | 'grande';
+
+export interface PortionPreset {
+  label: string;
+  multiplier: number;
+}
+
+export const PORTION_PRESETS: Record<PortionSize, PortionPreset> = {
+  pequeno: { label: 'Pequeno', multiplier: 0.6 },
+  medio: { label: 'Médio', multiplier: 1.0 },
+  grande: { label: 'Grande', multiplier: 1.4 },
+};
+
+export const HOUSEHOLD_MEASURES = [
+  { label: 'Colher de sopa', grams: 25 },
+  { label: 'Concha', grams: 140 },
+  { label: 'Copo (200ml)', grams: 200 },
+  { label: 'Fatia', grams: 30 },
+  { label: 'Unidade', grams: 0 },
+] as const;
 
 export interface AnalysisResult {
   analysisMetadata: AnalysisMetadata;
@@ -67,4 +146,5 @@ export interface HistoryEntry {
   date: string;
   totalCalories: number;
   foods: FoodItem[];
+  nutritionScore?: NutritionScore;
 }

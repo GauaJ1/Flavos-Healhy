@@ -22,3 +22,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+Ideias
+
+# Android build artifacts
+android/app/build/
+android/.gradle/
+
+# Environment
+.env

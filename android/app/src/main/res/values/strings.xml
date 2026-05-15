@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Flavos Healthy</string>
+    <string name="title_activity_main">Flavos Healthy</string>
+    <string name="package_name">com.flavos.healthy</string>
+    <string name="custom_url_scheme">com.flavos.healthy</string>
+</resources>

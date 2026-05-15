@@ -11,6 +11,8 @@ import {
 import type { HistoryEntry } from '../types';
 import { CalendarIcon, FlameIcon, TrashIcon } from './icons';
 import { motion, AnimatePresence } from 'framer-motion';
+import SyncBadge from './SyncBadge';
+import { isNativePlatform } from '../services/healthSyncService';
 
 interface HistoryViewProps {
   history: HistoryEntry[];
@@ -165,9 +167,14 @@ const HistoryView: React.FC<HistoryViewProps> = ({ history, onDeleteEntry }) => 
                 >
                     <div className="flex justify-between items-start relative z-10">
                         <div className="flex-1 pr-4">
-                            <p className="text-xs text-gray-500 font-medium uppercase tracking-wider mb-1">
-                                {new Date(entry.date).toLocaleDateString('pt-BR', { weekday: 'short', day: 'numeric', month: 'short' })} • {new Date(entry.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                            </p>
+                            <div className="flex items-center gap-2 mb-1">
+                              <p className="text-xs text-gray-500 font-medium uppercase tracking-wider">
+                                  {new Date(entry.date).toLocaleDateString('pt-BR', { weekday: 'short', day: 'numeric', month: 'short' })} • {new Date(entry.date).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                              </p>
+                              {isNativePlatform() && localStorage.getItem('flavos_health_sync_enabled') === 'true' && (
+                                <SyncBadge synced={true} compact={true} />
+                              )}
+                            </div>
                             <p className="text-gray-200 font-medium line-clamp-1">
                                 {entry.foods.map(f => f.name).join(', ')}
                             </p>
