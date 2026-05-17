@@ -29,5 +29,10 @@ Ideias
 android/app/build/
 android/.gradle/
 
-# Environment
+# Environment variables — NEVER commit these
 .env
+.env.*
+!.env.example
+
+# Agent workspace — internal tooling, never public
+.agents/
