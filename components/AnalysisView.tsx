@@ -894,6 +894,7 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
               </div>
             </motion.div>
 
+            {result.suggestions && result.suggestions.length > 0 && (
             <motion.div variants={itemVariants} className="space-y-4">
                 <h3 className="text-xl font-bold text-white px-2 flex items-center gap-2">
                     <LightBulbIcon className="w-5 h-5 text-yellow-400" />
@@ -913,6 +914,7 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
                     ))}
                 </div>
             </motion.div>
+            )}
         </div>
       </motion.div>
     </div>
