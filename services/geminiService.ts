@@ -228,6 +228,15 @@ function enforceConsistency(result: AnalysisResult): AnalysisResult {
     return result;
   }
 
+  // Recalcular calorias de cada alimento individualmente usando os fatores de Atwater
+  // (4 kcal/g para carboidratos e proteínas, 9 kcal/g para gorduras) para garantir 100% de consistência com os macros.
+  result.foods.forEach(food => {
+    const carbCal = (food.carbohydrates || 0) * 4;
+    const protCal = (food.protein || 0) * 4;
+    const fatCal = (food.fat || 0) * 9;
+    food.calories = Math.round(carbCal + protCal + fatCal);
+  });
+
   // Recalcular baseCalories como soma exata dos alimentos
   const calculatedCalories = result.foods.reduce(
     (sum, food) => sum + (food.calories || 0), 0

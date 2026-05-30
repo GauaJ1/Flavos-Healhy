@@ -170,10 +170,10 @@ export async function syncFoodItem(food: FoodItem): Promise<boolean> {
 
   try {
     const result = await HealthSync.insertNutrition({
-      calories: food.calories * food.consumedFraction,
-      protein: food.protein * food.consumedFraction,
-      carbohydrates: food.carbohydrates * food.consumedFraction,
-      fat: food.fat * food.consumedFraction,
+      calories: food.calories,
+      protein: food.protein,
+      carbohydrates: food.carbohydrates,
+      fat: food.fat,
       mealName: food.name,
       clientRecordId: `flavos_food_${food.id}`,
     });
@@ -195,10 +195,10 @@ export async function syncMeal(entry: HistoryEntry): Promise<boolean> {
   try {
     const foods = entry.foods.map(food => ({
       name: food.name,
-      calories: food.calories * food.consumedFraction,
-      protein: food.protein * food.consumedFraction,
-      carbohydrates: food.carbohydrates * food.consumedFraction,
-      fat: food.fat * food.consumedFraction,
+      calories: food.calories,
+      protein: food.protein,
+      carbohydrates: food.carbohydrates,
+      fat: food.fat,
     }));
 
     const result = await HealthSync.insertMeal({

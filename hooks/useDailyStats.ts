@@ -68,10 +68,9 @@ export function useDailyStats(history: HistoryEntry[]) {
       // em vez de recalcular somando alimentos individuais, que pode divergir
       base.calories += entry.totalCalories;
       for (const food of entry.foods) {
-        const f = food.consumedFraction;
-        base.protein += food.protein * f;
-        base.carbohydrates += food.carbohydrates * f;
-        base.fat += food.fat * f;
+        base.protein += food.protein;
+        base.carbohydrates += food.carbohydrates;
+        base.fat += food.fat;
       }
     }
     return {

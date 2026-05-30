@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import type { AnalysisResult, FoodItem } from '../types';
 import { FlameIcon, LightBulbIcon, ShareIcon, PlusCircleIcon, XMarkIcon } from './icons';
 import { motion } from 'framer-motion';
@@ -8,7 +8,7 @@ import ProcessingBreakdownComp from './ProcessingBreakdown';
 import MicronutrientPanel from './MicronutrientPanel';
 import NutritionalAlerts from './NutritionalAlerts';
 import PortionAdjuster from './PortionAdjuster';
-import { calculateNutritionScore, calculateProcessingBreakdown, aggregateMicronutrients, generateAlerts } from '../utils/nutritionScore';
+import { calculateNutritionScore, calculateProcessingBreakdown, aggregateMicronutrients, generateAlerts, adjustFoodPortion } from '../utils/nutritionScore';
 import { buildMealShareMessage } from '../utils/shareMessage';
 import { loadGoals } from '../hooks/useDailyStats';
 import { Capacitor } from '@capacitor/core';
@@ -19,7 +19,7 @@ interface AnalysisViewProps {
   result: AnalysisResult;
   imageFile: File | null;
   onAnalyzeAnother: () => void;
-  onSave: (result: AnalysisResult, finalCalories: number) => void;
+  onSave: (result: AnalysisResult, finalCalories: number, entryId?: number) => void;
 }
 
 const MacroBar: React.FC<{ label: string; value: number; total: number; color: string }> = ({ label, value, total, color }) => {
@@ -50,6 +50,17 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
   const [adjustedFoods, setAdjustedFoods] = useState<FoodItem[]>(result.foods || []);
   const [finalCalories, setFinalCalories] = useState<number>(result.nutritionalSummary?.baseCalories || 0);
   const [hasSaved, setHasSaved] = useState(false);
+  const [savedEntryId, setSavedEntryId] = useState<number | null>(null);
+
+  const triggerSave = useCallback((customResult: AnalysisResult, calories: number) => {
+    setSavedEntryId(currentId => {
+      const id = currentId || Date.now();
+      setTimeout(() => {
+        onSave(customResult, calories, id);
+      }, 0);
+      return id;
+    });
+  }, [onSave]);
 
   // Estados para respostas personalizadas/customizadas
   const [customModes, setCustomModes] = useState<Record<string, boolean>>({});
@@ -91,15 +102,15 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
 
   // Origem das calorias por macronutriente (Atwater)
   const { carbCal, protCal, fatCal, carbPct, protPct, fatPct } = useMemo(() => {
-    const cCal = Math.round(totalCarbs * 4);
-    const pCal = Math.round(totalProtein * 4);
-    const fCal = Math.round(totalFat * 9);
+    const cCal = adjustedFoods.reduce((sum, food) => sum + Math.round((food.carbohydrates || 0) * 4), 0);
+    const pCal = adjustedFoods.reduce((sum, food) => sum + Math.round((food.protein || 0) * 4), 0);
+    const fCal = adjustedFoods.reduce((sum, food) => sum + Math.round((food.fat || 0) * 9), 0);
     const totalCalc = cCal + pCal + fCal || 1;
     const cPct = Math.round((cCal / totalCalc) * 100);
     const pPct = Math.round((pCal / totalCalc) * 100);
     const fPct = Math.max(0, 100 - cPct - pPct); // garantir soma 100% e evitar valor negativo
     return { carbCal: cCal, protCal: pCal, fatCal: fCal, carbPct: cPct, protPct: pPct, fatPct: fPct };
-  }, [totalCarbs, totalProtein, totalFat]);
+  }, [adjustedFoods]);
 
   // Impacto Metabólico e Velocidade de Absorção
   const metabolicImpact = useMemo(() => {
@@ -174,15 +185,31 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
     const newFoods = [...adjustedFoods];
     newFoods[index] = adjusted;
     setAdjustedFoods(newFoods);
-    setFinalCalories(newFoods.reduce((s, f) => s + f.calories, 0));
+    const newCal = newFoods.reduce((s, f) => s + f.calories, 0);
+    setFinalCalories(newCal);
+
+    const updatedResult = {
+      ...result,
+      foods: newFoods,
+      nutritionalSummary: {
+        ...result.nutritionalSummary,
+        baseCalories: newCal,
+        totalFiber: Math.round(newFoods.reduce((s, f) => s + (f.fiber || 0), 0) * 10) / 10,
+        totalSugar: Math.round(newFoods.reduce((s, f) => s + (f.sugar || 0), 0) * 10) / 10,
+        totalAddedSugar: Math.round(newFoods.reduce((s, f) => s + (f.addedSugar || 0), 0) * 10) / 10,
+        totalSodium: Math.round(newFoods.reduce((s, f) => s + (f.sodium || 0), 0)),
+        totalSaturatedFat: Math.round(newFoods.reduce((s, f) => s + (f.saturatedFat || 0), 0) * 10) / 10,
+      }
+    };
+    triggerSave(updatedResult, newCal);
   };
 
   useEffect(() => {
     if (result.analysisMetadata && !result.analysisMetadata.requiresFollowUp && !hasSaved && result.analysisMetadata.isRealFood) {
-      onSave(result, result.nutritionalSummary.baseCalories);
+      triggerSave(currentResult, result.nutritionalSummary.baseCalories);
       setHasSaved(true);
     }
-  }, [result, hasSaved, onSave]);
+  }, [result, hasSaved, currentResult, triggerSave]);
 
   const updateCustomAnswer = (qId: string, text: string, impact: number) => {
     setAnswers(prev => ({
@@ -253,7 +280,26 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
     const final = Math.round(calc * fraction);
     setFinalCalories(final);
     setIsRefining(false);
-    onSave(result, final);
+
+    // Aplicar a fração consumida diretamente aos alimentos
+    const refinedFoods = adjustedFoods.map(food => adjustFoodPortion(food, fraction));
+    setAdjustedFoods(refinedFoods);
+
+    const refinedResult = {
+      ...result,
+      foods: refinedFoods,
+      nutritionalSummary: {
+        ...result.nutritionalSummary,
+        baseCalories: refinedFoods.reduce((s, f) => s + f.calories, 0),
+        totalFiber: Math.round(refinedFoods.reduce((s, f) => s + (f.fiber || 0), 0) * 10) / 10,
+        totalSugar: Math.round(refinedFoods.reduce((s, f) => s + (f.sugar || 0), 0) * 10) / 10,
+        totalAddedSugar: Math.round(refinedFoods.reduce((s, f) => s + (f.addedSugar || 0), 0) * 10) / 10,
+        totalSodium: Math.round(refinedFoods.reduce((s, f) => s + (f.sodium || 0), 0)),
+        totalSaturatedFat: Math.round(refinedFoods.reduce((s, f) => s + (f.saturatedFat || 0), 0) * 10) / 10,
+      }
+    };
+
+    triggerSave(refinedResult, final);
     setHasSaved(true);
   };
 
@@ -261,7 +307,7 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
     const final = result.nutritionalSummary.maxPossibleCalories;
     setFinalCalories(final);
     setIsRefining(false);
-    onSave(result, final);
+    triggerSave(currentResult, final);
     setHasSaved(true);
   };
 

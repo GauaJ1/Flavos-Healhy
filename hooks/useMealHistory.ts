@@ -31,6 +31,18 @@ export const useMealHistory = () => {
     });
   }, []);
 
+  const updateHistoryEntry = useCallback((updatedEntry: HistoryEntry) => {
+    setHistory(prevHistory => {
+      const updatedHistory = prevHistory.map(entry => entry.id === updatedEntry.id ? updatedEntry : entry);
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedHistory));
+      } catch (error) {
+        console.error("Falha ao atualizar o histórico no armazenamento local", error);
+      }
+      return updatedHistory;
+    });
+  }, []);
+
   const removeHistoryEntry = useCallback((id: number) => {
     setHistory(prevHistory => {
       const updatedHistory = prevHistory.filter(entry => entry.id !== id);
@@ -43,5 +55,5 @@ export const useMealHistory = () => {
     });
   }, []);
 
-  return { history, addHistoryEntry, removeHistoryEntry };
+  return { history, addHistoryEntry, removeHistoryEntry, updateHistoryEntry };
 };

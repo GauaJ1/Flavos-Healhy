@@ -276,13 +276,18 @@ export function adjustFoodPortion(food: FoodItem, multiplier: number): FoodItem 
     finalMultiplier = MAX_KCAL_PER_DAY / food.calories;
   }
 
+  const carbs = Math.round(food.carbohydrates * finalMultiplier * 10) / 10;
+  const protein = Math.round(food.protein * finalMultiplier * 10) / 10;
+  const fat = Math.round(food.fat * finalMultiplier * 10) / 10;
+  const calories = Math.round(carbs * 4 + protein * 4 + fat * 9);
+
   return {
     ...food,
-    calories: Math.round(food.calories * finalMultiplier),
+    calories,
     estimatedWeightGrams: Math.round(food.estimatedWeightGrams * finalMultiplier),
-    carbohydrates: Math.round(food.carbohydrates * finalMultiplier * 10) / 10,
-    protein: Math.round(food.protein * finalMultiplier * 10) / 10,
-    fat: Math.round(food.fat * finalMultiplier * 10) / 10,
+    carbohydrates: carbs,
+    protein: protein,
+    fat: fat,
     fiber: Math.round((food.fiber || 0) * finalMultiplier * 10) / 10,
     sugar: Math.round((food.sugar || 0) * finalMultiplier * 10) / 10,
     addedSugar: Math.round((food.addedSugar || 0) * finalMultiplier * 10) / 10,

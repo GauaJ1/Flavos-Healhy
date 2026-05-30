@@ -206,14 +206,19 @@ const App: React.FC = () => {
                 result={analysisResult}
                 imageFile={selectedImage}
                 onAnalyzeAnother={resetApp}
-                onSave={(finalResult, finalCalories) => {
+                onSave={(finalResult, finalCalories, entryId) => {
+                  const id = entryId || Date.now();
                   const entry = {
-                    id: Date.now(),
+                    id,
                     date: new Date().toISOString(),
                     totalCalories: finalCalories,
                     foods: finalResult.foods,
                   };
-                  addHistoryEntry(entry);
+                  if (entryId && history.some(e => e.id === entryId)) {
+                    updateHistoryEntry(entry);
+                  } else {
+                    addHistoryEntry(entry);
+                  }
                   healthSync.syncMealEntry(entry);
                   // Stay on analysis view so user can review the meal stats
                   // Dashboard is available via the "Hoje" tab
