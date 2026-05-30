@@ -3,11 +3,12 @@
  *
  * Mostra:
  * - Streak de dias
- * - Anel de calorias do dia
- * - Cards de macros
+ * - Anel de calorias (agora com meta personalizada via TMB/TDEE)
+ * - Cards de macros (metas personalizadas)
  * - Hidratação
  * - Peso corporal
- * - Balanço calórico (steps — Fase 3, quando disponível)
+ * - Conquistas
+ * - Arco-íris de diversidade alimentar + janela alimentar (Fase 3)
  * - Deep Link Samsung Health (Android)
  */
 import React, { useCallback } from 'react';
@@ -17,29 +18,44 @@ import { useDailyStats, loadGoals } from '../hooks/useDailyStats';
 import { useHydration } from '../hooks/useHydration';
 import { useWeight } from '../hooks/useWeight';
 import { useStreaks } from '../hooks/useStreaks';
+import { useAchievements } from '../hooks/useAchievements';
+import { useFoodDiversity } from '../hooks/useFoodDiversity';
 import CalorieRing from './CalorieRing';
 import MacroCards from './MacroCards';
 import HydrationTracker from './HydrationTracker';
 import WeightTracker from './WeightTracker';
 import StreakBadge from './StreakBadge';
-import { isNativePlatform } from '../services/healthSyncService';
+import AchievementsPanel from './AchievementsPanel';
+import DiversityPanel from './DiversityPanel';
 
 interface DashboardViewProps {
   history: HistoryEntry[];
   isSyncEnabled: boolean;
   isNative: boolean;
+  hasProfile: boolean;
+  onOpenProfile: () => void;
 }
 
 const DashboardView: React.FC<DashboardViewProps> = ({
   history,
   isSyncEnabled,
   isNative,
+  hasProfile,
+  onOpenProfile,
 }) => {
   const goals = loadGoals();
   const { macros } = useDailyStats(history);
   const hydration = useHydration(isSyncEnabled);
   const weight = useWeight(isSyncEnabled);
   const streak = useStreaks(history);
+  const { weeklyDiversity, eatingWindow } = useFoodDiversity(history);
+
+  const waterGoalMet = hydration.percentage >= 100;
+  const achievements = useAchievements(history, {
+    diversityScore: weeklyDiversity.score,
+    hasProfile,
+    waterGoalMet,
+  });
 
   const today = new Date().toLocaleDateString('pt-BR', {
     weekday: 'long',
@@ -48,9 +64,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
   });
 
   const openSamsungHealth = useCallback(() => {
-    // Deep Link para Samsung Health — Nutrição
     window.location.href = 'samsunghealth://Nutrition';
-    // Fallback para Play Store se app não instalado
     setTimeout(() => {
       window.location.href =
         'https://play.google.com/store/apps/details?id=com.sec.android.app.shealth';
@@ -65,26 +79,62 @@ const DashboardView: React.FC<DashboardViewProps> = ({
       exit={{ opacity: 0, y: -12 }}
       className="w-full max-w-md mx-auto flex flex-col gap-4 pb-6"
     >
-      {/* Date header */}
+      {/* Date header + profile button */}
       <div className="flex items-center justify-between">
         <div>
           <p className="text-xs text-gray-500 capitalize">{today}</p>
           <h2 className="text-lg font-bold text-white">Dashboard de Saúde</h2>
         </div>
-        {isNative && isSyncEnabled && (
-          <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-3 py-1">
-            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-xs text-emerald-400">Sync ativo</span>
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          {isNative && isSyncEnabled && (
+            <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-3 py-1">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-xs text-emerald-400">Sync ativo</span>
+            </div>
+          )}
+          <button
+            onClick={onOpenProfile}
+            className="w-8 h-8 rounded-full bg-gray-800 border border-gray-700 flex items-center justify-center hover:border-emerald-500/50 transition-colors"
+            aria-label="Editar perfil"
+            title={hasProfile ? 'Editar perfil e metas' : 'Configurar perfil para metas personalizadas'}
+          >
+            <svg className={`w-4 h-4 ${hasProfile ? 'text-emerald-400' : 'text-gray-500'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
+          </button>
+        </div>
       </div>
+
+      {/* Profile CTA — se não tiver perfil */}
+      {!hasProfile && (
+        <motion.button
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          onClick={onOpenProfile}
+          className="w-full flex items-center gap-3 bg-gradient-to-r from-emerald-900/40 to-teal-900/30 border border-emerald-500/20 rounded-2xl p-3.5 text-left hover:border-emerald-500/40 transition-all"
+        >
+          <div className="w-9 h-9 rounded-xl bg-emerald-500/20 flex items-center justify-center text-lg flex-shrink-0">🎯</div>
+          <div>
+            <p className="text-sm font-semibold text-emerald-300">Personalize suas metas</p>
+            <p className="text-xs text-gray-500">Configure seu perfil para metas calóricas baseadas no seu corpo.</p>
+          </div>
+          <svg className="w-4 h-4 text-gray-500 ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </motion.button>
+      )}
 
       {/* Streak */}
       <StreakBadge streak={streak} />
 
       {/* Calorie ring */}
       <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-5 flex flex-col items-center gap-2">
-        <p className="text-xs text-gray-500 self-start">Calorias do dia</p>
+        <div className="flex justify-between items-center w-full mb-1">
+          <p className="text-xs text-gray-500">Calorias do dia</p>
+          {hasProfile && (
+            <p className="text-xs text-emerald-400/70">meta personalizada</p>
+          )}
+        </div>
         <CalorieRing
           consumed={macros.calories}
           goal={goals.calories}
@@ -116,7 +166,16 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         onAdd={weight.addWeight}
       />
 
-      {/* Samsung Health Deep Link — Phase 3 */}
+      {/* Diversidade alimentar + janela (Fase 3) */}
+      <div>
+        <p className="text-xs text-gray-500 font-medium mb-2 pl-1">Qualidade Alimentar</p>
+        <DiversityPanel diversity={weeklyDiversity} eatingWindow={eatingWindow} />
+      </div>
+
+      {/* Conquistas */}
+      <AchievementsPanel achievements={achievements} />
+
+      {/* Samsung Health Deep Link */}
       {isNative && (
         <motion.button
           initial={{ opacity: 0 }}

@@ -25,9 +25,21 @@ const responseSchema = {
             type: Type.OBJECT,
             properties: {
               id: { type: Type.STRING, description: 'ID único da pergunta (ex: "q1", "q2").' },
-              question: { type: Type.STRING, description: 'Pergunta em português, clara e direta.' },
-              type: { type: Type.STRING, description: '"boolean" (sim/não) ou "fraction" (quanto comeu, 0.0–1.0).' },
-              calorieImpact: { type: Type.INTEGER, description: 'Calorias a adicionar se resposta for sim. Para fraction, use 0.' }
+              question: { type: Type.STRING, description: 'Pergunta em português, clara e direta. Ex: "Como o frango foi preparado?"' },
+              type: { type: Type.STRING, description: '"boolean" (sim/não), "fraction" (quanto comeu, 0.0–1.0) ou "choice" (múltipla escolha).' },
+              calorieImpact: { type: Type.INTEGER, description: 'Calorias a adicionar se tipo for boolean e resposta for sim. Para choice e fraction, use 0.' },
+              choices: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    label: { type: Type.STRING, description: 'Texto curto do botão (ex: "Frito por imersão", "Grelhado/Assado", "Com açúcar", "Sem açúcar").' },
+                    calorieImpact: { type: Type.INTEGER, description: 'Calorias a adicionar/subtrair para esta opção específica.' }
+                  },
+                  required: ['label', 'calorieImpact']
+                },
+                description: 'Obrigatório APENAS se o tipo for "choice". Lista de opções customizadas para os botões.'
+              }
             },
             required: ['id', 'question', 'type', 'calorieImpact']
           }
@@ -137,12 +149,17 @@ Analise a imagem enviada e responda SOMENTE com um JSON válido, sem markdown, s
 - Classifique isMixedDish (prato misturado) e isPackagedFood (produto embalado).
 - Liste uncertaintyReasons específicos (ex: "molho pode conter creme de leite", "não é possível ver a base do prato").
 - REGRA DE FOLLOW-UP: Se confiança = "baixa", prato misturado, ingredientes ocultos prováveis, ou variância calórica > 200kcal → requiresFollowUp = true.
+- REGRAS IMPORTANTES PARA PERGUNTAS (followUpQuestions):
+  - NUNCA use type="boolean" para perguntas que apresentam opções (ex: "Foi preparado frito ou grelhado?"). Responder "Sim" ou "Não" para isso é um erro grave de interface.
+  - Se a pergunta exigir que o usuário selecione entre opções específicas de preparo, tipos de molhos, complementos, etc., use obrigatoriamente type="choice" e defina a lista de botões personalizados no array choices[].
+  - Para perguntas simples de Sim ou Não (ex: "Foi adicionado azeite extra por cima?"), use type="boolean".
+  - Para medir a quantidade consumida (ex: "Você comeu todo o prato ou apenas uma parte?"), use type="fraction".
 - Exemplos de boas followUpQuestions:
-  - "Foi adicionado óleo ou azeite no preparo?" → type="boolean", calorieImpact=120
+  - "Foi adicionado óleo ou azeite extra por cima do prato pronto?" → type="boolean", calorieImpact=120
   - "Você comeu tudo ou apenas parte do prato?" → type="fraction", calorieImpact=0
-  - "O molho era à base de creme, maionese ou queijo?" → type="boolean", calorieImpact=80
-  - "A bebida era com açúcar?" → type="boolean", calorieImpact=60
-  - "Esse alimento foi frito, assado ou grelhado?" → type="boolean", calorieImpact=100
+  - "Como o frango/carne foi preparado?" → type="choice", calorieImpact=0, choices=[{"label": "Grelhado, assado ou cozido", "calorieImpact": 0}, {"label": "Grelhado com azeite ou manteiga", "calorieImpact": 60}, {"label": "Frito por imersão ou empanado", "calorieImpact": 150}]
+  - "Qual era a base do molho utilizado?" → type="choice", calorieImpact=0, choices=[{"label": "Tomate, vinagrete ou shoyu", "calorieImpact": 20}, {"label": "Branco, quatro queijos ou maionese", "calorieImpact": 120}, {"label": "Sem molho", "calorieImpact": 0}]
+  - "A bebida continha açúcar?" → type="choice", calorieImpact=0, choices=[{"label": "Sem açúcar / Zero / Adoçante", "calorieImpact": 0}, {"label": "Com açúcar adicionado", "calorieImpact": 80}]
 
 ## ETAPA 2 — ESTIMATIVA DE PORÇÕES
 Use referências visuais brasileiras para estimar o peso de cada alimento:
@@ -280,7 +297,7 @@ export const analyzeImage = async (base64Image: string, userContext?: string): P
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3.1-flash-lite-preview',
+      model: 'gemini-3.1-flash-lite',
       contents: { parts: [imagePart, textPart] },
       config: {
         responseMimeType: "application/json",

@@ -3,10 +3,12 @@ import { analyzeImage } from './services/geminiService';
 import type { AnalysisResult } from './types';
 import { useMealHistory } from './hooks/useMealHistory';
 import { useHealthSync } from './hooks/useHealthSync';
+import { useUserProfile } from './hooks/useUserProfile';
 import ImageUploader from './components/ImageUploader';
 import AnalysisView from './components/AnalysisView';
 import LoadingView from './components/LoadingView';
 import TutorialModal from './components/TutorialModal';
+import OnboardingModal from './components/OnboardingModal';
 import ImagePreview from './components/ImagePreview';
 import HealthSyncToggle from './components/HealthSyncToggle';
 import DashboardView from './components/DashboardView';
@@ -51,11 +53,13 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [showTutorial, setShowTutorial] = useState<boolean>(false);
+  const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
   const [view, setView] = useState<View>('upload');
   const [activeTab, setActiveTab] = useState<Tab>('upload');
 
   const { history, addHistoryEntry, removeHistoryEntry } = useMealHistory();
   const healthSync = useHealthSync();
+  const { profile, targets, hasProfile, updateProfile } = useUserProfile();
 
   // Dark mode
   useEffect(() => {
@@ -64,7 +68,7 @@ const App: React.FC = () => {
     localStorage.setItem('theme', 'dark');
   }, []);
 
-  // PWA service worker
+  // PWA service worker e check de onboarding
   useEffect(() => {
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
@@ -77,6 +81,12 @@ const App: React.FC = () => {
     if (isFirstVisit) {
       setShowTutorial(true);
       localStorage.setItem('nutrisnap_visited', 'true');
+    }
+
+    // Abre onboarding automaticamente se não houver perfil salvo
+    const hasStoredProfile = !!localStorage.getItem('flavos_user_profile');
+    if (!hasStoredProfile) {
+      setShowOnboarding(true);
     }
   }, []);
 
@@ -222,6 +232,8 @@ const App: React.FC = () => {
               history={history}
               isSyncEnabled={healthSync.isSyncEnabled}
               isNative={healthSync.isNative}
+              hasProfile={hasProfile}
+              onOpenProfile={() => setShowOnboarding(true)}
             />
           </motion.div>
         );
@@ -304,6 +316,15 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#111827] font-sans text-gray-200 flex flex-col bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-gray-800 via-gray-900 to-black">
       {showTutorial && <TutorialModal onClose={() => setShowTutorial(false)} />}
+      {showOnboarding && (
+        <OnboardingModal
+          onComplete={(profile) => {
+            updateProfile(profile);
+            setShowOnboarding(false);
+          }}
+          onSkip={() => setShowOnboarding(false)}
+        />
+      )}
 
       {/* ── Header ── */}
       {!hideChrome && (

@@ -1,8 +1,14 @@
+export interface FollowUpChoice {
+  label: string;
+  calorieImpact: number;
+}
+
 export interface FollowUpQuestion {
   id: string;
   question: string;
-  type: 'boolean' | 'fraction';
+  type: 'boolean' | 'fraction' | 'choice';
   calorieImpact: number;
+  choices?: FollowUpChoice[];
 }
 
 export interface AnalysisMetadata {

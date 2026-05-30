@@ -10,6 +10,7 @@ import NutritionalAlerts from './NutritionalAlerts';
 import PortionAdjuster from './PortionAdjuster';
 import { calculateNutritionScore, calculateProcessingBreakdown, aggregateMicronutrients, generateAlerts } from '../utils/nutritionScore';
 import { buildMealShareMessage } from '../utils/shareMessage';
+import { loadGoals } from '../hooks/useDailyStats';
 import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import { Filesystem, Directory } from '@capacitor/filesystem';
@@ -50,6 +51,11 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
   const [finalCalories, setFinalCalories] = useState<number>(result.nutritionalSummary?.baseCalories || 0);
   const [hasSaved, setHasSaved] = useState(false);
 
+  // Estados para respostas personalizadas/customizadas
+  const [customModes, setCustomModes] = useState<Record<string, boolean>>({});
+  const [customTexts, setCustomTexts] = useState<Record<string, string>>({});
+  const [customImpacts, setCustomImpacts] = useState<Record<string, number>>({});
+
   // Recalcular quando porções mudam
   const currentResult = useMemo(() => {
     const r = { ...result, foods: adjustedFoods };
@@ -61,6 +67,108 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
   const processingBreakdown = useMemo(() => calculateProcessingBreakdown(adjustedFoods), [adjustedFoods]);
   const micronutrients = useMemo(() => aggregateMicronutrients(adjustedFoods), [adjustedFoods]);
   const alerts = useMemo(() => generateAlerts(currentResult), [currentResult]);
+
+  // Carregar metas diárias para comparação e insights
+  const dailyGoals = useMemo(() => loadGoals(), []);
+  const dailyBudget = dailyGoals.calories || 2000;
+  const caloriePercentage = Math.round((finalCalories / dailyBudget) * 100);
+
+  // Equivalentes de Atividade Física
+  const walkTime = Math.round(finalCalories / 4); // ~4 kcal/min caminhando
+  const cycleTime = Math.round(finalCalories / 7); // ~7 kcal/min pedalando
+  const runTime = Math.round(finalCalories / 10); // ~10 kcal/min correndo
+
+  // Densidade calórica e termômetro
+  const densityValue = result.nutritionalSummary.calorieDensity || 'media';
+  const densityPercent = 
+    densityValue === 'baixa' ? '16.6%' : 
+    densityValue === 'media' ? '50%' : '83.3%';
+
+  // ATP e Performance
+  const totalCarbs = useMemo(() => adjustedFoods.reduce((sum, food) => sum + food.carbohydrates, 0), [adjustedFoods]);
+  const totalProtein = useMemo(() => adjustedFoods.reduce((sum, food) => sum + food.protein, 0), [adjustedFoods]);
+  const totalFat = useMemo(() => adjustedFoods.reduce((sum, food) => sum + food.fat, 0), [adjustedFoods]);
+
+  // Origem das calorias por macronutriente (Atwater)
+  const { carbCal, protCal, fatCal, carbPct, protPct, fatPct } = useMemo(() => {
+    const cCal = Math.round(totalCarbs * 4);
+    const pCal = Math.round(totalProtein * 4);
+    const fCal = Math.round(totalFat * 9);
+    const totalCalc = cCal + pCal + fCal || 1;
+    const cPct = Math.round((cCal / totalCalc) * 100);
+    const pPct = Math.round((pCal / totalCalc) * 100);
+    const fPct = Math.max(0, 100 - cPct - pPct); // garantir soma 100% e evitar valor negativo
+    return { carbCal: cCal, protCal: pCal, fatCal: fCal, carbPct: cPct, protPct: pPct, fatPct: fPct };
+  }, [totalCarbs, totalProtein, totalFat]);
+
+  // Impacto Metabólico e Velocidade de Absorção
+  const metabolicImpact = useMemo(() => {
+    const fiber = adjustedFoods.reduce((sum, food) => sum + (food.fiber || 0), 0);
+    
+    if (totalCarbs <= 5) {
+      return {
+        label: 'Homeostase Lipídica / Cetogênica',
+        desc: 'Energia proveniente quase exclusivamente de proteínas e gorduras. Mantém a glicose estável sem picos de insulina.',
+        color: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20',
+        emoji: '🔋'
+      };
+    }
+    
+    const fiberRatio = fiber / totalCarbs;
+    const proteinRatio = totalProtein / totalCarbs;
+    
+    if (fiberRatio >= 0.15 || proteinRatio >= 0.5) {
+      return {
+        label: 'Energia Gradual / Sustentada',
+        desc: 'Liberação lenta de glicose. Sem picos de insulina, excelente para saciedade e controle de peso.',
+        color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+        emoji: '🌱'
+      };
+    } else if (fiberRatio < 0.08 && proteinRatio < 0.25) {
+      return {
+        label: 'Energia Rápida / Pico Glicêmico',
+        desc: 'Absorção veloz. Ótimo para energia de explosão pré-treino, mas pode causar cansaço posterior.',
+        color: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
+        emoji: '⚡'
+      };
+    } else {
+      return {
+        label: 'Energia Moderada / Estável',
+        desc: 'Absorção equilibrada. Fornece energia estável ao longo de 2 a 3 horas.',
+        color: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
+        emoji: '⚖️'
+      };
+    }
+  }, [totalCarbs, totalProtein, adjustedFoods]);
+
+  const { atpTitle, atpDescription } = useMemo(() => {
+    if (totalProtein >= 20 && totalCarbs >= 30) {
+      return {
+        atpTitle: 'Refeição Alta Performance (Anabólica & Energética)',
+        atpDescription: 'Combinação ideal de carboidratos para reabastecer rapidamente o glicogênio (recuperando os estoques de ATP celular) e proteínas de alto valor biológico para otimizar a regeneração e anabolismo muscular pós-esforço.'
+      };
+    } else if (totalCarbs >= 40) {
+      return {
+        atpTitle: 'Super Recarga de ATP (Glicogênio Ativo)',
+        atpDescription: 'Rica em carboidratos, ideal para fornecer glicose rápida para as mitocôndrias produzirem ATP. Excelente pré-treino para garantir explosão muscular e alta disposição física.'
+      };
+    } else if (totalProtein >= 20) {
+      return {
+        atpTitle: 'Recuperação Tecidual & Saciedade Prolongada',
+        atpDescription: 'Foco em aminoácidos essenciais para a reparação de microlesões musculares. O alto teor proteico ativa vias de saciedade e ajuda a preservar a massa muscular ativa mesmo em repouso.'
+      };
+    } else if (totalCarbs <= 15 && totalFat >= 15) {
+      return {
+        atpTitle: 'Energia Sustentada via Lipídeos (Foco de Resistência)',
+        atpDescription: 'Baixo carboidrato com gorduras saudáveis. Estimula a via de oxidação lipídica e produção de corpos cetônicos para energia mental constante, sem oscilações de insulina ou fadiga.'
+      };
+    } else {
+      return {
+        atpTitle: 'Aporte de Energia Diária Estabilizado',
+        atpDescription: 'Combinação balanceada de nutrientes que fornece energia estável ao organismo. Apoia a homeostase metabólica e mantém os processos vitais ativos sem picos elevados de glicose sanguínea.'
+      };
+    }
+  }, [totalCarbs, totalProtein, totalFat]);
 
   const handlePortionAdjust = (index: number, adjusted: FoodItem) => {
     const newFoods = [...adjustedFoods];
@@ -76,15 +184,69 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
     }
   }, [result, hasSaved, onSave]);
 
+  const updateCustomAnswer = (qId: string, text: string, impact: number) => {
+    setAnswers(prev => ({
+      ...prev,
+      [qId]: {
+        isCustom: true,
+        text,
+        calorieImpact: impact
+      }
+    }));
+  };
+
+  const handleCustomTextChange = (qId: string, text: string) => {
+    setCustomTexts(prev => {
+      const nextTexts = { ...prev, [qId]: text };
+      updateCustomAnswer(qId, nextTexts[qId], customImpacts[qId] || 0);
+      return nextTexts;
+    });
+  };
+
+  const handleCustomImpactChange = (qId: string, impact: number) => {
+    setCustomImpacts(prev => {
+      const nextImpacts = { ...prev, [qId]: impact };
+      updateCustomAnswer(qId, customTexts[qId] || '', nextImpacts[qId]);
+      return nextImpacts;
+    });
+  };
+
+  const toggleCustomMode = (qId: string) => {
+    setCustomModes(prev => {
+      const nextMode = !prev[qId];
+      if (nextMode) {
+        const initialText = '';
+        const initialImpact = 0;
+        setCustomTexts(t => ({ ...t, [qId]: initialText }));
+        setCustomImpacts(i => ({ ...i, [qId]: initialImpact }));
+        updateCustomAnswer(qId, initialText, initialImpact);
+      } else {
+        setAnswers(prevAnswers => {
+          const nextAnswers = { ...prevAnswers };
+          delete nextAnswers[qId];
+          return nextAnswers;
+        });
+      }
+      return { ...prev, [qId]: nextMode };
+    });
+  };
+
   const handleFinishRefinement = () => {
     let calc = result.nutritionalSummary.baseCalories;
     let fraction = 1;
 
     result.analysisMetadata.followUpQuestions.forEach(q => {
-      if (q.type === 'boolean' && answers[q.id] === true) {
-        calc += q.calorieImpact;
-      } else if (q.type === 'fraction' && answers[q.id] !== undefined) {
-        fraction = answers[q.id];
+      const ans = answers[q.id];
+      if (ans && typeof ans === 'object' && ans.isCustom) {
+        calc += ans.calorieImpact;
+      } else {
+        if (q.type === 'boolean' && ans === true) {
+          calc += q.calorieImpact;
+        } else if (q.type === 'fraction' && ans !== undefined) {
+          fraction = ans;
+        } else if (q.type === 'choice' && ans !== undefined) {
+          calc += ans;
+        }
       }
     });
 
@@ -234,25 +396,97 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
         <p className="text-gray-300 mb-6 text-sm">Encontramos seu prato, mas precisamos de alguns detalhes para sermos exatos.</p>
 
         <div className="space-y-6">
-          {result.analysisMetadata.followUpQuestions.map(q => (
-            <div key={q.id} className="bg-gray-900/50 p-5 rounded-xl border border-gray-700">
-              <p className="text-emerald-400 font-medium mb-4">{q.question}</p>
-              {q.type === 'boolean' ? (
-                <div className="flex gap-3">
-                  <button onClick={() => setAnswers({...answers, [q.id]: true})} className={`flex-1 py-3 rounded-xl font-medium transition-all ${answers[q.id] === true ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/20' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-700'}`}>Sim</button>
-                  <button onClick={() => setAnswers({...answers, [q.id]: false})} className={`flex-1 py-3 rounded-xl font-medium transition-all ${answers[q.id] === false ? 'bg-red-600 text-white shadow-lg shadow-red-900/20' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-700'}`}>Não</button>
+          {result.analysisMetadata.followUpQuestions.map(q => {
+            const isCustom = customModes[q.id];
+            return (
+              <div key={q.id} className="bg-gray-900/50 p-5 rounded-xl border border-gray-700 space-y-4">
+                <div className="flex justify-between items-start gap-4">
+                  <p className="text-emerald-400 font-medium">{q.question}</p>
+                  <button
+                    onClick={() => toggleCustomMode(q.id)}
+                    className={`text-xs px-2.5 py-1 rounded-md transition-all flex items-center gap-1 ${
+                      isCustom 
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' 
+                        : 'bg-gray-800 text-gray-400 border border-gray-750 hover:bg-gray-750 hover:text-white'
+                    }`}
+                  >
+                    {isCustom ? '✨ Usar Prontos' : '✍️ Personalizar'}
+                  </button>
                 </div>
-              ) : (
-                <div className="flex gap-2">
-                  {[0.25, 0.5, 0.75, 1].map(frac => (
-                    <button key={frac} onClick={() => setAnswers({...answers, [q.id]: frac})} className={`flex-1 py-2 rounded-lg font-medium text-sm transition-all ${answers[q.id] === frac ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/20' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-700'}`}>
-                      {frac === 1 ? 'Tudo' : frac === 0.5 ? 'Metade' : `${frac * 100}%`}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
+
+                {isCustom ? (
+                  <div className="space-y-4 pt-2">
+                    <div>
+                      <label className="text-[11px] text-gray-400 font-medium mb-1 block">Sua resposta personalizada:</label>
+                      <input
+                        type="text"
+                        placeholder="Ex: Grelhado com pouco azeite, cozido no vapor, frito na airfryer..."
+                        className="w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 transition-colors text-sm"
+                        value={customTexts[q.id] || ''}
+                        onChange={(e) => handleCustomTextChange(q.id, e.target.value)}
+                      />
+                    </div>
+                    
+                    <div className="space-y-2 bg-gray-800/40 p-3 rounded-xl border border-gray-755">
+                      <div className="flex justify-between text-xs text-gray-400">
+                        <span>Ajuste de calorias adicionais:</span>
+                        <span className="font-bold text-emerald-400">
+                          {customImpacts[q.id] > 0 ? `+${customImpacts[q.id]}` : customImpacts[q.id]} kcal
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={-150}
+                        max={350}
+                        step={10}
+                        value={customImpacts[q.id] !== undefined ? customImpacts[q.id] : 0}
+                        onChange={(e) => handleCustomImpactChange(q.id, Number(e.target.value))}
+                        className="w-full accent-emerald-500"
+                      />
+                      <div className="flex justify-between text-[9px] text-gray-500 font-mono">
+                        <span>Sem gordura (-150 kcal)</span>
+                        <span>Normal (0 kcal)</span>
+                        <span>Frito / Calórico (+350 kcal)</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    {q.type === 'boolean' ? (
+                      <div className="flex gap-3">
+                        <button onClick={() => setAnswers({...answers, [q.id]: true})} className={`flex-1 py-3 rounded-xl font-medium transition-all ${answers[q.id] === true ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/20' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-700'}`}>Sim</button>
+                        <button onClick={() => setAnswers({...answers, [q.id]: false})} className={`flex-1 py-3 rounded-xl font-medium transition-all ${answers[q.id] === false ? 'bg-red-600 text-white shadow-lg shadow-red-900/20' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-700'}`}>Não</button>
+                      </div>
+                    ) : q.type === 'fraction' ? (
+                      <div className="flex gap-2">
+                        {[0.25, 0.5, 0.75, 1].map(frac => (
+                          <button key={frac} onClick={() => setAnswers({...answers, [q.id]: frac})} className={`flex-1 py-2 rounded-lg font-medium text-sm transition-all ${answers[q.id] === frac ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/20' : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-700'}`}>
+                            {frac === 1 ? 'Tudo' : frac === 0.5 ? 'Metade' : `${frac * 100}%`}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        {q.choices?.map((choice, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => setAnswers({...answers, [q.id]: choice.calorieImpact})}
+                            className={`w-full py-3 px-4 rounded-xl font-medium text-left transition-all ${
+                              answers[q.id] === choice.calorieImpact
+                                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/20 border-emerald-500'
+                                : 'bg-gray-800 text-gray-400 hover:bg-gray-700 border border-gray-700/80 hover:border-gray-600'
+                            }`}
+                          >
+                            {choice.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
 
         <div className="mt-8 flex gap-3">
@@ -300,6 +534,33 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
                  </span>
                  <span className="text-xl text-gray-400 font-medium">kcal</span>
             </div>
+
+            {/* Macro Energy Distribution Bar */}
+            <div className="mb-4 bg-gray-900/35 rounded-2xl p-3 border border-gray-700/40 space-y-2 relative z-10">
+              <div className="flex justify-between text-[10px] text-gray-400 font-semibold uppercase tracking-wider">
+                <span>Origem das Calorias</span>
+                <span className="font-mono text-emerald-400">Soma: {carbCal + protCal + fatCal} kcal</span>
+              </div>
+              <div className="w-full h-2 rounded-full overflow-hidden flex bg-gray-800 border border-gray-700/30">
+                <div style={{ width: `${carbPct}%` }} className="bg-blue-400 h-full" />
+                <div style={{ width: `${protPct}%` }} className="bg-emerald-400 h-full" />
+                <div style={{ width: `${fatPct}%` }} className="bg-yellow-400 h-full" />
+              </div>
+              <div className="flex justify-between text-[10px] font-semibold text-gray-300">
+                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>{carbPct}% Carb ({carbCal} kcal)</span>
+                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>{protPct}% Prot ({protCal} kcal)</span>
+                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-yellow-400"></span>{fatPct}% Gord ({fatCal} kcal)</span>
+              </div>
+            </div>
+
+            {/* Metabolic Impact Badge */}
+            <div className={`mb-5 p-3.5 rounded-2xl border ${metabolicImpact.color} flex gap-2.5 items-start relative z-10`}>
+              <span className="text-xl leading-none pt-0.5">{metabolicImpact.emoji}</span>
+              <div className="space-y-0.5">
+                <p className="text-xs font-bold uppercase tracking-wider">{metabolicImpact.label}</p>
+                <p className="text-[10px] text-gray-300 leading-normal font-medium">{metabolicImpact.desc}</p>
+              </div>
+            </div>
             
             {(result.nutritionalSummary.possiblePositiveComponents?.length > 0 || result.nutritionalSummary.possibleAttentionPoints?.length > 0) && (
               <div className="grid grid-cols-2 gap-4 mb-6 relative z-10">
@@ -345,7 +606,120 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
             </div>
           </div>
         </motion.div>
-        
+
+        {/* ⚡ Insights de Energia & Performance (Calorie & ATP context) */}
+        <motion.div variants={itemVariants} className="bg-gray-800/60 backdrop-blur-md rounded-3xl shadow-xl border border-gray-700/50 p-6 md:p-8 relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-48 h-48 bg-emerald-500/5 rounded-full blur-3xl -mr-16 -mt-16"></div>
+          
+          <h3 className="text-base font-bold text-white mb-6 flex items-center gap-2 relative z-10">
+            <span className="text-emerald-400">⚡</span> Insights de Energia & Performance
+          </h3>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 relative z-10">
+            
+            {/* Daily Target Progress */}
+            <div className="bg-gray-900/40 border border-gray-700/40 rounded-2xl p-5 space-y-3 flex flex-col justify-between">
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Orçamento Diário</span>
+                  <span className="text-xs text-emerald-400 font-bold font-mono">
+                    {caloriePercentage}%
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-3xl font-extrabold text-white">{finalCalories}</span>
+                  <span className="text-xs text-gray-500">/ {dailyBudget} kcal</span>
+                </div>
+                <div className="w-full bg-gray-800 rounded-full h-2 overflow-hidden border border-gray-700/50">
+                  <div 
+                    className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full rounded-full transition-all duration-1000"
+                    style={{ width: `${Math.min(100, caloriePercentage)}%` }}
+                  />
+                </div>
+              </div>
+              <p className="text-[10px] text-gray-500 leading-normal pt-1">
+                Esta refeição consome {caloriePercentage}% do seu orçamento calórico diário recomendado de {dailyBudget} kcal.
+              </p>
+            </div>
+            
+            {/* Calorie Density Thermometer */}
+            <div className="bg-gray-900/40 border border-gray-700/40 rounded-2xl p-5 space-y-3 flex flex-col justify-between">
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Densidade Calórica</span>
+                  <span className={`text-[9px] font-bold px-2 py-0.5 rounded-md uppercase ${
+                    densityValue === 'baixa' ? 'bg-emerald-500/20 text-emerald-400' :
+                    densityValue === 'media' ? 'bg-yellow-500/20 text-yellow-400' :
+                    'bg-red-500/20 text-red-400'
+                  }`}>
+                    {densityValue === 'media' ? 'média' : densityValue}
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-2xl font-bold text-white leading-none">
+                    {densityValue === 'baixa' ? 'Alto Volume' : densityValue === 'media' ? 'Equilibrada' : 'Concentrada'}
+                  </span>
+                </div>
+                <div className="relative pt-1">
+                  <div className="w-full bg-gray-800 rounded-full h-2 overflow-hidden flex border border-gray-700/50">
+                    <div className="bg-emerald-500 h-full flex-1" title="Baixa" />
+                    <div className="bg-yellow-500 h-full flex-1" title="Média" />
+                    <div className="bg-red-500 h-full flex-1" title="Alta" />
+                  </div>
+                  {/* Indicator Pin */}
+                  <div 
+                    className="absolute top-0 -mt-1 w-2.5 h-4 bg-white border border-gray-900 rounded-full shadow-md transition-all duration-700" 
+                    style={{ left: `calc(${densityPercent} - 5px)` }}
+                  />
+                </div>
+              </div>
+              <p className="text-[10px] text-gray-500 leading-normal pt-1">
+                {densityValue === 'baixa' ? 'Excelente volume físico para poucas calorias. Altamente recomendável para saciedade!' :
+                 densityValue === 'media' ? 'Equilíbrio ideal entre peso do alimento e calorias fornecidas.' :
+                 'Alta concentração calórica por porção. Monitore o tamanho das porções se quer controlar peso.'}
+              </p>
+            </div>
+
+            {/* ATP Recovery & Muscle Performance */}
+            <div className="bg-gray-900/40 border border-gray-700/40 rounded-2xl p-5 space-y-2 col-span-1 md:col-span-2 lg:col-span-2 flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider block">Performance e Recuperação de Energia (ATP)</span>
+                <div className="flex items-center gap-3 pt-2">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-xl shrink-0">
+                    ⚡
+                  </div>
+                  <div className="text-sm font-bold text-gray-200">
+                    {atpTitle}
+                  </div>
+                </div>
+              </div>
+              <p className="text-[11px] text-gray-400 leading-relaxed pt-1">
+                {atpDescription}
+              </p>
+            </div>
+
+          </div>
+
+          {/* Physical Activity Equivalents */}
+          <div className="mt-6 pt-6 border-t border-gray-700/40 space-y-4 relative z-10">
+            <span className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider block">Equivalentes Estimados de Gasto Físico</span>
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { name: 'Caminhada', emoji: '🚶', time: walkTime, speed: '4 km/h', bg: 'from-emerald-500/10 to-teal-500/5', border: 'border-emerald-500/10', text: 'text-emerald-400' },
+                { name: 'Ciclismo', emoji: '🚴', time: cycleTime, speed: '16 km/h', bg: 'from-blue-500/10 to-indigo-500/5', border: 'border-blue-500/10', text: 'text-blue-400' },
+                { name: 'Corrida', emoji: '🏃', time: runTime, speed: '8 km/h', bg: 'from-amber-500/10 to-orange-500/5', border: 'border-amber-500/10', text: 'text-amber-400' }
+              ].map(act => (
+                <div key={act.name} className={`bg-gradient-to-br ${act.bg} border ${act.border} rounded-2xl p-4 flex flex-col items-center justify-center text-center`}>
+                  <span className="text-2xl mb-1">{act.emoji}</span>
+                  <span className="text-[10px] text-gray-500 font-medium uppercase tracking-wide">{act.name}</span>
+                  <span className={`text-xl font-extrabold ${act.text} mt-1`}>{act.time} <span className="text-xs font-normal">min</span></span>
+                  <span className="text-[9px] text-gray-600 mt-0.5">{act.speed}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </motion.div>
+
         {/* Nutrition Score + Detailed Panel */}
         <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <NutritionScoreBadge score={nutritionScore} />
@@ -407,8 +781,13 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
                           </p>
                           <p className="text-xs text-gray-500 mt-0.5">{food.portionDescription}</p>
                         </div>
-                        <div className="bg-gray-900/50 px-3 py-1 rounded-lg border border-gray-700">
+                        <div className="bg-gray-900/50 px-3 py-1.5 rounded-lg border border-gray-700 text-right">
                           <p className="font-bold text-white">{food.calories} kcal</p>
+                          {finalCalories > 0 && (
+                            <p className="text-[10px] text-emerald-400 font-semibold mt-0.5">
+                              {Math.round((food.calories / finalCalories) * 100)}% do prato
+                            </p>
+                          )}
                         </div>
                       </div>
                       
