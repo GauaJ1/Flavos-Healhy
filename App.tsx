@@ -15,6 +15,7 @@ import DashboardView from './components/DashboardView';
 import HistoryView from './components/HistoryView';
 import CameraView from './components/CameraView';
 import { AnimatePresence, motion } from 'framer-motion';
+import { compressImage } from './utils/imageCompression';
 
 type View = 'upload' | 'preview' | 'analysis' | 'history' | 'camera' | 'dashboard';
 type Tab = 'upload' | 'dashboard' | 'history';
@@ -106,8 +107,9 @@ const App: React.FC = () => {
     setAnalysisResult(null);
     setView('upload');
     try {
+      const compressedFile = await compressImage(imageFile);
       const reader = new FileReader();
-      reader.readAsDataURL(imageFile);
+      reader.readAsDataURL(compressedFile);
       reader.onload = async () => {
         try {
           const base64Image = (reader.result as string).split(',')[1];
