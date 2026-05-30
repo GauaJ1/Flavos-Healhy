@@ -1,7 +1,8 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import type { AnalysisResult } from '../types';
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// O cliente do GoogleGenAI não é inicializado globalmente para evitar erros 
+// em produção quando a chave process.env.API_KEY estiver vazia.
 
 // ──────────────────────────────────────────────────────────────
 // Schema JSON — Referência canônica (alinhado com SKILL.md)
@@ -302,7 +303,8 @@ export const analyzeImage = async (base64Image: string, userContext?: string): P
     const textPart = { text: promptText };
 
     try {
-      const response = await ai.models.generateContent({
+      const localAi = new GoogleGenAI({ apiKey });
+      const response = await localAi.models.generateContent({
         model: 'gemini-3.1-flash-lite',
         contents: { parts: [imagePart, textPart] },
         config: {
