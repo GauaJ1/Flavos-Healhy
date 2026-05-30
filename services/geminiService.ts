@@ -285,48 +285,80 @@ function enforceConsistency(result: AnalysisResult): AnalysisResult {
 // ──────────────────────────────────────────────────────────────
 
 export const analyzeImage = async (base64Image: string, userContext?: string): Promise<AnalysisResult> => {
-  const imagePart = {
-    inlineData: {
-      mimeType: 'image/jpeg',
-      data: base64Image
-    }
-  };
+  const apiKey = process.env.API_KEY;
 
-  const promptText = buildPrompt(userContext);
-  const textPart = { text: promptText };
-
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.1-flash-lite',
-      contents: { parts: [imagePart, textPart] },
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: responseSchema,
+  if (apiKey) {
+    // -------------------------------------------------------------------------
+    // Desenvolvimento Local: Chamada direta à API do Gemini usando chave do .env
+    // -------------------------------------------------------------------------
+    const imagePart = {
+      inlineData: {
+        mimeType: 'image/jpeg',
+        data: base64Image
       }
-    });
+    };
 
-    const jsonText = response.text?.trim();
-    if (!jsonText) {
-      throw new Error('Resposta vazia da IA');
-    }
+    const promptText = buildPrompt(userContext);
+    const textPart = { text: promptText };
 
-    let parsed: AnalysisResult;
     try {
-      parsed = JSON.parse(jsonText) as AnalysisResult;
-    } catch (parseError) {
-      // Log seguro: sem dados sensíveis, sem base64
-      console.error('[NutritionAnalysis] JSON inválido da IA (tamanho da resposta:', jsonText.length, 'chars)');
-      throw new Error('Resposta inválida da IA. Tente novamente.');
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.1-flash-lite',
+        contents: { parts: [imagePart, textPart] },
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: responseSchema,
+        }
+      });
+
+      const jsonText = response.text?.trim();
+      if (!jsonText) {
+        throw new Error('Resposta vazia da IA');
+      }
+
+      const parsed = JSON.parse(jsonText) as AnalysisResult;
+      return enforceConsistency(parsed);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro desconhecido';
+      console.error('[NutritionAnalysis] Falha na análise local:', message);
+      throw new Error('Falha ao processar a imagem localmente. Tente novamente.');
     }
+  } else {
+    // -------------------------------------------------------------------------
+    // Produção / APK Nativo: Chamada segura através do Backend Proxy na Vercel
+    // -------------------------------------------------------------------------
+    const isLocalWebDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    
+    // No app Capacitor no celular, window.location é http://localhost ou capacitor://localhost,
+    // então precisamos apontar obrigatoriamente para a URL absoluta da produção.
+    const hasCapacitor = window.hasOwnProperty('Capacitor') || window.location.protocol.startsWith('capacitor') || window.location.protocol.startsWith('http-case');
+    const proxyUrl = (isLocalWebDev && !hasCapacitor)
+      ? '/api/analyze'
+      : 'https://healthy.flavoscompany.xyz/api/analyze';
 
-    // Pós-processamento determinístico — força consistência de totais
-    const result = enforceConsistency(parsed);
+    try {
+      const response = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          imageBase64: base64Image,
+          userContext
+        })
+      });
 
-    return result;
-  } catch (error) {
-    // Log seguro: sem PII, sem base64 de imagem (LGPD)
-    const message = error instanceof Error ? error.message : 'Erro desconhecido';
-    console.error('[NutritionAnalysis] Falha na análise:', message);
-    throw new Error('Falha ao processar a imagem. Tente novamente.');
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Erro HTTP no proxy: ${response.status} - ${errorText}`);
+      }
+
+      const parsed = await response.json() as AnalysisResult;
+      return enforceConsistency(parsed);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Erro desconhecido';
+      console.error('[NutritionAnalysis] Falha na análise via proxy:', message);
+      throw new Error('Falha ao processar a imagem via servidor de produção. Tente novamente.');
+    }
   }
 };

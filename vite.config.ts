@@ -17,8 +17,9 @@ export default defineConfig(({ mode }) => {
     },
     // Define variáveis globais para o código do cliente
     define: {
-      // Isso garante que process.env.API_KEY tenha o valor definido no seu arquivo .env ou nas variáveis de ambiente do sistema de deploy
-      'process.env.API_KEY': JSON.stringify(env.API_KEY)
+      // Em produção (build final), a chave NUNCA é injetada no bundle do cliente para segurança contra vazamentos no APK.
+      // Em desenvolvimento local (mode === 'development'), injetamos a chave para facilitar o desenvolvimento sem proxy local.
+      'process.env.API_KEY': JSON.stringify(mode === 'development' ? (env.API_KEY || '') : '')
     }
   };
 });
