@@ -33,6 +33,11 @@ android/.gradle/
 # Distribute via GitHub Releases only
 *.apk
 
+# Android signing keystore — NEVER commit to git
+*.jks
+*.keystore
+release.properties
+
 # Environment variables — NEVER commit these
 .env
 .env.*
@@ -40,3 +45,5 @@ android/.gradle/
 
 # Agent workspace — internal tooling, never public
 .agents/
+
+# migrations/ é intencionalmente versionada — schema SQL sem segredos

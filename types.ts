@@ -35,6 +35,10 @@ export interface NutritionalSummary {
   totalAddedSugar: number;
   totalSodium: number;
   totalSaturatedFat: number;
+  // Fase 1:
+  antiInflammatoryScore?: number;
+  fiberTotal_g?: number;
+  dailyCoveragePercent?: Record<string, number>;
 }
 
 export interface MicronutrientEstimate {
@@ -73,6 +77,26 @@ export interface FoodItem {
   possibleAddedFats: boolean;
   possibleExcessSodium: boolean;
   possibleIndustrializedSauces: boolean;
+  // Fase 1:
+  glycemicIndex?: number;
+  glycemicLoad?: number;
+  fiberDetailed?: {
+    total_g: number;
+    soluble_g: number;
+    insoluble_g: number;
+  };
+  micronutrientsDetailed?: {
+    iron_mg?: number;
+    calcium_mg?: number;
+    vitaminC_mg?: number;
+    vitaminD_mcg?: number;
+    magnesium_mg?: number;
+    potassium_mg?: number;
+    zinc_mg?: number;
+    vitaminB12_mcg?: number;
+  };
+  // Fase 3:
+  foodGroup?: string;
 }
 
 // ────────────────────────────────────────────────────────

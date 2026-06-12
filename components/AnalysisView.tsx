@@ -770,15 +770,52 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
         <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <NutritionScoreBadge score={nutritionScore} />
           <div className="space-y-4">
-            <DetailedNutritionPanel summary={currentResult.nutritionalSummary} />
+            <DetailedNutritionPanel summary={currentResult.nutritionalSummary} foods={adjustedFoods} />
             <ProcessingBreakdownComp breakdown={processingBreakdown} />
+            {/* Card de Índice Anti-inflamatório */}
+            {(() => {
+              const score = currentResult.nutritionalSummary.antiInflammatoryScore ?? 5.0;
+              let title = 'Neutro / Estável';
+              let desc = 'Refeição balanceada. Sem picos inflamatórios significativos.';
+              let color = 'text-blue-400 bg-blue-500/10 border-blue-500/20';
+              let emoji = '⚖️';
+              let bgGradient = 'from-blue-500/10 to-indigo-500/5';
+
+              if (score >= 7.0) {
+                title = 'Altamente Anti-inflamatório';
+                desc = 'Rica em compostos protetores, fibras e fitoquímicos que combatem a inflamação.';
+                color = 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
+                emoji = '🍃';
+                bgGradient = 'from-emerald-500/10 to-teal-500/5';
+              } else if (score < 4.5) {
+                title = 'Foco de Atenção Inflamatória';
+                desc = 'Contém maior proporção de ultraprocessados, açúcar ou saturadas. Equilibre na próxima.';
+                color = 'text-orange-400 bg-orange-500/10 border-orange-500/20';
+                emoji = '🔥';
+                bgGradient = 'from-orange-500/10 to-red-500/5';
+              }
+
+              return (
+                <div className={`bg-gradient-to-br ${bgGradient} border border-gray-700/50 rounded-2xl p-4 flex items-start gap-3 relative overflow-hidden`}>
+                  <div className="text-3xl">{emoji}</div>
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Índice Anti-inflamatório</span>
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${color}`}>{score.toFixed(1)} / 10</span>
+                    </div>
+                    <p className="text-sm font-bold text-white">{title}</p>
+                    <p className="text-xs text-gray-300 leading-relaxed">{desc}</p>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </motion.div>
 
         {/* Alerts + Micronutrients */}
         <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <NutritionalAlerts alerts={alerts} />
-          <MicronutrientPanel estimates={micronutrients} />
+          <MicronutrientPanel estimates={micronutrients} dailyCoveragePercent={currentResult.nutritionalSummary.dailyCoveragePercent} />
         </motion.div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -863,6 +900,22 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
                         {food.addedSugar > 0 && (
                           <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-300 border border-red-500/20">
                             Açúcar add: {food.addedSugar}g
+                          </span>
+                        )}
+                        {food.glycemicIndex !== undefined && (
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full border ${
+                            food.glycemicIndex <= 55 
+                              ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20' 
+                              : food.glycemicIndex <= 69 
+                                ? 'bg-yellow-500/10 text-yellow-300 border-yellow-500/20' 
+                                : 'bg-red-500/10 text-red-300 border-red-500/20'
+                          }`}>
+                            IG: {food.glycemicIndex} ({food.glycemicIndex <= 55 ? 'Baixo' : food.glycemicIndex <= 69 ? 'Médio' : 'Alto'})
+                          </span>
+                        )}
+                        {food.glycemicLoad !== undefined && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/20">
+                            CG: {food.glycemicLoad} ({food.glycemicLoad <= 10 ? 'Baixa' : food.glycemicLoad <= 20 ? 'Média' : 'Alta'})
                           </span>
                         )}
                       </div>

@@ -18,6 +18,7 @@
 10. [Segurança e LGPD](#10-segurança-e-lgpd)
 11. [Regras de qualidade](#11-regras-de-qualidade)
 12. [Checklist de entrega por fase](#12-checklist-de-entrega-por-fase)
+13. [Referências científicas](#13-referências-científicas)
 
 ---
 
@@ -456,22 +457,104 @@ const GOAL_DELTA: Record<string, number> = {
   ganhar_massa: +300,
 }
 
-function calcProfile(user: UserProfile): NutritionalTargets {
+function calcTDEE(user: UserProfile): { tmbKcal: number; tdeeKcal: number; targetKcal: number } {
   const age = differenceInYears(new Date(), user.birthDate)
   const base = 10*user.weightKg + 6.25*user.heightCm - 5*age
   const tmb = user.sex === 'M' ? base + 5 : base - 161
   const tdee = Math.round(tmb * ACTIVITY_FACTOR[user.activityLevel])
   const targetKcal = tdee + GOAL_DELTA[user.goal]
 
-  // Macros: 30% proteína, 45% carbs, 25% gordura (ajustável)
-  return {
-    tmbKcal: Math.round(tmb),
-    tdeeKcal: tdee,
-    targetKcal,
-    targetProtein_g: Math.round((targetKcal * 0.30) / 4),
-    targetCarbs_g:   Math.round((targetKcal * 0.45) / 4),
-    targetFat_g:     Math.round((targetKcal * 0.25) / 9),
+  return { tmbKcal: Math.round(tmb), tdeeKcal: tdee, targetKcal }
+}
+```
+
+> ⚠️ **Nota de precisão**: equações preditivas como Mifflin-St Jeor tendem a subestimar o gasto
+> energético em pessoas que treinam pesado, especialmente adolescentes (ver
+> [Referências científicas](#13-referências-científicas), itens [8], [9] e [10]). Considere isso
+> ao revisar `targetKcal` junto com o usuário caso o peso não evolua conforme esperado — o TDEE
+> real pode estar alguns centos de kcal acima do calculado.
+
+### Distribuição de Macronutrientes (baseada em evidência)
+
+> ❌ **Não usar split fixo de % (ex: 30/45/25)** — esse modelo escala a proteína junto com as
+> calorias totais, mas a necessidade real de proteína escala com o **peso corporal**, não com o
+> gasto calórico. Em pessoas com TDEE alto relativo ao peso (ex: adolescentes em treino intenso
+> + superávit), um split fixo gera valores de proteína muito acima do necessário (ver
+> [Caso de validação](#caso-de-validação--perfil-kaua-15-anos-62kg-treino-intenso-ganhar-massa)
+> na seção 13).
+
+A proteína e o carboidrato são calculados em **g/kg de peso corporal/dia**, com faixas por nível
+de atividade derivadas do posicionamento conjunto AND/Dietitians of Canada/ACSM, do ISSN e de
+revisões específicas em adolescentes (referências [1], [2], [3], [5]). A gordura preenche o
+restante das calorias, com piso de 0,8 g/kg para saúde hormonal.
+
+| Nível de atividade | Proteína (g/kg/dia) | Carboidrato (g/kg/dia) |
+|---|---|---|
+| Sedentário | 0,8 – 1,2 (ideal 1,0) | 3 – 4 (ideal 3,5) |
+| Leve (1-3x/sem) | 1,0 – 1,4 (ideal 1,2) | 4 – 5 (ideal 4,5) |
+| Moderado (3-5x/sem) | 1,2 – 1,6 (ideal 1,4) | 5 – 7 (ideal 6) |
+| Intenso (6-7x/sem) | 1,4 – 2,0 (ideal 1,8) | 6 – 10 (ideal 8) |
+| Muito intenso | 1,6 – 2,2 (ideal 2,0) | 8 – 12 (ideal 10) |
+
+> **Adolescentes**: não é necessário reduzir o teto de proteína. Estudo controlado mostrou que
+> adolescentes do sexo masculino apresentam balanço proteico líquido igual ou superior ao de
+> adultos no mesmo platô de ~2,0 g/kg/dia (referência [4]). O valor "ideal" da tabela já é
+> apropriado para qualquer idade.
+
+```typescript
+type ActivityLevel = 'sedentario' | 'leve' | 'moderado' | 'intenso' | 'muito_intenso'
+
+const PROTEIN_GKG: Record<ActivityLevel, { min: number; ideal: number; max: number }> = {
+  sedentario:    { min: 0.8, ideal: 1.0, max: 1.2 },
+  leve:          { min: 1.0, ideal: 1.2, max: 1.4 },
+  moderado:      { min: 1.2, ideal: 1.4, max: 1.6 },
+  intenso:       { min: 1.4, ideal: 1.8, max: 2.0 },
+  muito_intenso: { min: 1.6, ideal: 2.0, max: 2.2 },
+}
+
+const CARBS_GKG: Record<ActivityLevel, { min: number; ideal: number; max: number }> = {
+  sedentario:    { min: 3, ideal: 3.5, max: 4 },
+  leve:          { min: 4, ideal: 4.5, max: 5 },
+  moderado:      { min: 5, ideal: 6,   max: 7 },
+  intenso:       { min: 6, ideal: 8,   max: 10 },
+  muito_intenso: { min: 8, ideal: 10,  max: 12 },
+}
+
+const FAT_FLOOR_GKG = 0.8 // piso de saúde hormonal — diretriz geral de nutrição esportiva (ver [1],[2])
+
+interface MacroTargets {
+  targetProtein_g: number
+  targetCarbs_g: number
+  targetFat_g: number
+}
+
+function calcMacros(weightKg: number, targetKcal: number, activity: ActivityLevel): MacroTargets {
+  let proteinG = Math.round(weightKg * PROTEIN_GKG[activity].ideal)
+  let carbsG   = Math.round(weightKg * CARBS_GKG[activity].ideal)
+
+  let fatKcal = targetKcal - proteinG * 4 - carbsG * 4
+  let fatG = Math.round(fatKcal / 9)
+
+  // Piso de gordura: se ficar abaixo de 0.8g/kg, "tomar emprestado" do carboidrato
+  const fatFloor = Math.round(weightKg * FAT_FLOOR_GKG)
+  if (fatG < fatFloor) {
+    const deficitKcal = (fatFloor - fatG) * 9
+    carbsG = Math.round(carbsG - deficitKcal / 4)
+    fatG = fatFloor
   }
+
+  return {
+    targetProtein_g: proteinG,
+    targetCarbs_g: Math.max(carbsG, 0),
+    targetFat_g: fatG,
+  }
+}
+
+function calcProfile(user: UserProfile): NutritionalTargets {
+  const { tmbKcal, tdeeKcal, targetKcal } = calcTDEE(user)
+  const macros = calcMacros(user.weightKg, targetKcal, user.activityLevel)
+
+  return { tmbKcal, tdeeKcal, targetKcal, ...macros }
 }
 ```
 
@@ -517,6 +600,161 @@ const ACHIEVEMENTS_DEF = [
   { id: 'iron_week',    title: 'Semana rica em ferro', threshold: (_, __, micro) => micro.avgIron >= 14 },
 ]
 ```
+
+### Distribuição de Refeições e Periodização de Carboidratos
+
+#### Objetivo
+
+Quando `targetCarbs_g` é alto em relação ao peso corporal (comum em superávit + atividade
+intensa), comer essa quantidade em poucas refeições "pesa" — gera desconforto digestivo e
+saciedade precoce que dificulta bater a meta. Em vez de aumentar/reduzir o valor calculado (que
+está correto pela evidência), o app deve **orientar como fracionar** essa quantidade ao longo
+do dia.
+
+#### Princípios
+
+1. **Proteína**: dividir igualmente entre as refeições, respeitando a faixa de **20-40g por
+   refeição** a cada 3-4h (referências [2], [3]). Se `targetProtein_g / nº de refeições` ficar
+   fora dessa faixa, sugerir ajustar o número de refeições.
+2. **Carboidrato — periodização**: concentrar uma fração maior nas refeições próximas ao
+   treino (pré e pós-treino), onde o corpo utiliza glicose com mais eficiência e o desconforto
+   gástrico durante o exercício é menor se a refeição anterior for mais leve em gordura/fibra.
+3. **Gordura**: reduzir nas refeições pré e pós-treino (digestão mais lenta atrapalha
+   performance e pode causar desconforto), redistribuindo para as refeições mais distantes do
+   treino.
+
+#### Algoritmo de distribuição
+
+```typescript
+type MealType = 'cafe' | 'lanche_manha' | 'almoco' | 'lanche_tarde' | 'jantar' | 'ceia'
+type MealRole = 'pre_treino' | 'pos_treino' | 'normal'
+
+interface MealConfig {
+  type: MealType
+  role: MealRole
+}
+
+interface MealMacroPlan {
+  type: MealType
+  role: MealRole
+  protein_g: number
+  carbs_g: number
+  fat_g: number
+}
+
+// % do total diário de carboidrato alocado às refeições de treino
+const CARB_SHARE_PRE_TREINO = 0.20
+const CARB_SHARE_POS_TREINO = 0.25
+
+// % do total diário de gordura alocado a CADA refeição de treino (o resto vai para as normais)
+const FAT_SHARE_PER_TRAINING_MEAL = 0.075 // ex: pré + pós = 15% no total
+
+function distributeMeals(targets: MacroTargets, meals: MealConfig[]): MealMacroPlan[] {
+  const proteinPerMeal = targets.targetProtein_g / meals.length
+
+  const preTreino = meals.find(m => m.role === 'pre_treino')
+  const posTreino = meals.find(m => m.role === 'pos_treino')
+  const normalMeals = meals.filter(m => m.role === 'normal')
+
+  const carbPre = preTreino ? targets.targetCarbs_g * CARB_SHARE_PRE_TREINO : 0
+  const carbPos = posTreino ? targets.targetCarbs_g * CARB_SHARE_POS_TREINO : 0
+  const carbNormalTotal = targets.targetCarbs_g - carbPre - carbPos
+  const carbPerNormal = normalMeals.length ? carbNormalTotal / normalMeals.length : 0
+
+  const trainingMealsCount = [preTreino, posTreino].filter(Boolean).length
+  const fatPerTrainingMeal = targets.targetFat_g * FAT_SHARE_PER_TRAINING_MEAL
+  const fatNormalTotal = targets.targetFat_g - fatPerTrainingMeal * trainingMealsCount
+  const fatPerNormal = normalMeals.length ? fatNormalTotal / normalMeals.length : 0
+
+  return meals.map(m => ({
+    type: m.type,
+    role: m.role,
+    protein_g: Math.round(proteinPerMeal),
+    carbs_g: Math.round(
+      m.role === 'pre_treino' ? carbPre :
+      m.role === 'pos_treino' ? carbPos : carbPerNormal
+    ),
+    fat_g: Math.round(m.role === 'normal' ? fatPerNormal : fatPerTrainingMeal),
+  }))
+}
+```
+
+#### Estratégia de "fracionamento" para cargas altas de carboidrato
+
+```typescript
+function carbLoadStrategy(targetCarbs_g: number, weightKg: number, currentMealCount: number) {
+  const gPerKg = targetCarbs_g / weightKg
+
+  if (gPerKg <= 6) {
+    return {
+      recommendedMealCount: currentMealCount,
+      tip: 'Distribuição padrão é suficiente — sem necessidade de ajustes.',
+    }
+  }
+
+  if (gPerKg <= 9) {
+    return {
+      recommendedMealCount: Math.max(currentMealCount, 5),
+      tip: 'Considere incluir uma vitamina/shake (aveia + banana + leite + pasta de '
+         + 'amendoim + mel) como uma das refeições — concentra bastante carboidrato e '
+         + 'caloria com baixo volume e digestão mais rápida.',
+    }
+  }
+
+  return {
+    recommendedMealCount: 6,
+    tip: 'Volume diário alto. Priorize fontes calóricas densas (aveia, granola, tapioca, '
+       + 'batata doce, pão, frutas secas, mel) em pelo menos 2 refeições, e reserve '
+       + 'saladas/vegetais de alto volume para apenas 1-2 refeições no dia, para não '
+       + 'antecipar a saciedade.',
+  }
+}
+```
+
+#### Tabela de referência — densidade calórica de fontes de carboidrato
+
+Use esta tabela para sugerir trocas/combinações que ajudam a "encaixar" carboidratos sem
+aumentar muito o volume do prato (valores aproximados, base TACO):
+
+| Alimento | kcal/100g | Carbo/100g | Densidade |
+|---|---|---|---|
+| Aveia em flocos | ~390 | ~67g | Alta |
+| Granola | ~450 | ~60g | Alta |
+| Tapioca (goma seca) | ~240 | ~85g | Alta |
+| Pão francês | ~270 | ~50g | Alta |
+| Mel | ~300 | ~80g | Alta |
+| Banana | ~90 | ~23g | Média |
+| Arroz branco cozido | ~130 | ~28g | Média |
+| Macarrão cozido | ~130 | ~25g | Média |
+| Batata-doce cozida | ~77 | ~18g | Baixa-média |
+| Feijão cozido | ~76 | ~14g | Baixa-média |
+| Vegetais folhosos / salada | ~15-30 | ~3-5g | Baixa (alto volume) |
+
+> 💡 Regra prática para o feedback do app: se `gPerKg > 7`, sugerir que pelo menos 30% do
+> carboidrato diário venha de fontes "Alta densidade" — caso contrário, o volume de comida
+> necessário tende a gerar desconforto e desistência do plano.
+
+#### Exemplo aplicado — perfil "Kaua" (62kg, intenso, treino à tarde)
+
+Targets diários: 112g proteína / 496g carboidrato / 83g gordura (ver seção de Distribuição de
+Macronutrientes acima). Configuração: 5 refeições, treino às 17h.
+
+| Refeição | Papel | Proteína | Carboidrato | Gordura |
+|---|---|---|---|---|
+| Café da manhã | normal | 22g | 91g | 24g |
+| Almoço | normal | 22g | 91g | 24g |
+| Lanche da tarde | pré-treino | 22g | 99g | 6g |
+| Shake pós-treino | pós-treino | 22g | 124g | 6g |
+| Jantar | normal | 22g | 91g | 24g |
+| **Total** | | **112g** | **496g** | **83g** |
+
+Como `496g / 62kg ≈ 8 g/kg` (faixa "considere shake" da `carbLoadStrategy`), o app deve sugerir
+que o "Shake pós-treino" seja de fato uma vitamina líquida (banana + aveia + leite + mel +
+pasta de amendoim) — assim os 124g de carboidrato dessa refeição não exigem um prato grande de
+comida sólida, e as outras refeições ficam em ~91g de carboidrato (ex: ~150g de arroz cozido +
+1 fruta), volume perfeitamente administrável.
+
+
 
 ### Frontend
 
@@ -818,6 +1056,10 @@ O app **sempre** deve:
 ### Fase 2 ✅
 - [ ] Onboarding coleta perfil e calcula TMB/TDEE
 - [ ] `users.target_kcal` atualiza quando peso muda
+- [ ] Macros calculados via `PROTEIN_GKG`/`CARBS_GKG` por nível de atividade — **não** split fixo de %
+- [ ] Gordura respeita o piso de 0,8 g/kg (saúde hormonal)
+- [ ] `carbLoadStrategy` ativado quando `targetCarbs_g / weightKg > 6` — sugestão de fracionamento exibida
+- [ ] Plano de distribuição de refeições (`distributeMeals`) disponível na tela de metas
 - [ ] Cron de streaks rodando (00:05 UTC-3)
 - [ ] Conquistas desbloqueando corretamente
 - [ ] Tela de progresso com gráfico de peso e tendência
@@ -835,3 +1077,36 @@ O app **sempre** deve:
 - [ ] Bottom sheet de check-in no app
 - [ ] Queries de correlação funcionando (mínimo 20 amostras)
 - [ ] Insight semanal de correlação gerado pela IA
+
+---
+
+## 13. Referências científicas
+
+> Base de evidência usada para a Distribuição de Macronutrientes (seção 7 / Fase 2) e para o
+> recálculo do TDEE. Sempre que esta tabela for revisada, atualizar também `PROTEIN_GKG`,
+> `CARBS_GKG` e `ACTIVITY_FACTOR` no código e no `PROMPT_MESTRE.md`.
+
+| # | Fonte | Achado usado no app |
+|---|---|---|
+| [1] | Thomas DT, Erdman KA, Burke LM. *Position of the Academy of Nutrition and Dietetics, Dietitians of Canada, and the American College of Sports Medicine: Nutrition and Athletic Performance.* J Acad Nutr Diet, 2016. | Posicionamento conjunto de 3 entidades: proteína 1,2–2,0 g/kg/dia para atletas (sem distinção por esporte/gênero). Carboidrato: 5–7 g/kg (exercício moderado, 1h/dia), 6–10 g/kg (moderado-alto, 1-3h/dia), 8–12 g/kg (ultra-endurance). Base das colunas "min/max" da tabela de macros. |
+| [2] | Jäger R, et al. *ISSN Position Stand: protein and exercise.* J Int Soc Sports Nutr, 2017;14:20. | 1,4–2,0 g/kg/dia suficiente para construir/manter massa muscular; 2,3–3,1 g/kg/dia só traz benefício adicional em **déficit** calórico. Também recomenda ~0,25 g/kg (20-40g) de proteína a cada 3-4h — base do `proteinPerMeal` na distribuição de refeições. |
+| [3] | *Optimizing Performance Nutrition for Adolescent Athletes: A Review of Dietary Needs, Risks, and Practical Strategies.* Nutrients, 2025;17(17):2792. | Atletas adolescentes precisam de 1,4–2,0 g/kg/dia de proteína (vs. 0,75–1,05 g/kg/dia da população geral nessa idade). Confirma 20-40g de proteína por refeição a cada 3-4h também para adolescentes. |
+| [4] | Mazzulla M, et al. *Whole-body net protein balance plateaus in response to increasing protein intakes during post-exercise recovery in adults and adolescents.* Nutr Metab (Lond), 2018;15:62. | Estudo controlado: o platô de síntese proteica ocorre por volta de **2,0 g/kg/dia** em indivíduos treinados em força. Em adolescentes do sexo masculino, o balanço proteico líquido no platô foi **igual ou maior** que em adultos — não há justificativa para reduzir o teto de proteína por idade. Acima do platô, o excesso é oxidado/excretado (ureia/creatinina aumentam linearmente). |
+| [5] | *Protein intake in adolescent athletes* (revisão), 2025. | Faixas por tipo de esporte: resistência (corrida) 1,2–1,6 g/kg/dia; força/potência 1,6–2,0 g/kg/dia. Usado para diferenciar `moderado` (predomínio aeróbico) de `intenso`/`muito_intenso` (predomínio de força) na tabela. |
+| [6] | *Nutrition for Children and Adolescents Who Practice Sport: A Narrative Review.* Nutrients, 2024;16(16):2803. | Sports Dietitians Australia: atletas adolescentes competitivos podem seguir as diretrizes de adultos de elite (~1,3–1,8 g/kg/dia); ingestão típica de adolescentes (1,2–1,6 g/kg/dia) já costuma ser adequada, sem necessidade de suplementação extra. |
+| [7] | Gatorade Sports Science Institute. *Youth Athlete Development and Nutrition.* | Discussão sobre limitações de equações preditivas de gasto energético em adolescentes atletas e sugestão de ~1,5 g/kg/dia como piso "seguro" de proteína baseado no platô por refeição. |
+| [8] | Reale R, et al. (equações de RMR para atletas juniores, citado em [7]). | Equações preditivas baseadas em adultos (incl. Mifflin-St Jeor) **subestimam** a RMR de atletas adolescentes em até ~300 kcal/dia — motivou o desenvolvimento de equações específicas para essa população. Base da nota de precisão sobre `targetKcal`. |
+| [9] | *Accuracy of Resting Metabolic Rate Prediction Equations in Athletes: A Systematic Review with Meta-analysis.* Sports Med, 2023. | Mifflin-St Jeor está entre as equações que significativamente sub/superestimam a RMR medida em atletas (diferente de Cunningham/Harris-Benedict, que não diferem significativamente do valor medido). Reforça o item [8]. |
+| [10] | *Physical Activity Levels to Estimate the Energy Requirement of Adolescent Athletes.* Pediatr Exerc Sci, 2011;23(2):261. | PAL medido em atletas adolescentes ≈ 1,90 ± 0,35 — próximo ao `ACTIVITY_FACTOR.intenso` (1,725) usado no app, mas com desvio-padrão grande, o que reforça que o valor é uma aproximação e pode precisar de ajuste manual caso o peso não evolua conforme esperado. |
+| [11] | IOC Consensus Statement on Youth Athletic Development. Br J Sports Med, 2015. | Diretriz geral para nutrição de jovens atletas: priorizar carboidratos nutritivos, proteína de alta qualidade e ingestão adequada de cálcio, vitamina D e ferro — alinhado com a Fase 1 (micronutrientes) e a tabela TACO. |
+
+### Caso de validação — perfil "Kaua" (15 anos, 62kg, treino intenso, ganhar massa)
+
+| Etapa | Proteína | Carboidrato | Gordura | Observação |
+|---|---|---|---|---|
+| Split fixo 30/45/25% (modelo antigo) | 236g (3,8 g/kg) | 355g | 88g | Acima de qualquer faixa em [1]–[6]; "desperdiça" calorias em proteína em vez de carboidrato/treino |
+| Modelo g/kg final (este documento) | 112g (1,8 g/kg) | 496g | 83g | Dentro de [1]–[6] para atividade "intenso"; carboidrato dentro de 6-10 g/kg de [1] |
+
+> Diferença prática: -124g de proteína (-50%), +141g de carboidrato (+40%), gordura praticamente
+> igual. O `carbLoadStrategy` recomenda 5 refeições com 1 vitamina/shake pós-treino para esse
+> volume de carboidrato (ver seção 7).

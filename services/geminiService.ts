@@ -1,5 +1,7 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import type { AnalysisResult } from '../types';
+import { findTACOMatch } from '../utils/tacoDatabase';
+import { classifyFoodGroup } from '../hooks/useFoodDiversity';
 
 // O cliente do GoogleGenAI não é inicializado globalmente para evitar erros 
 // em produção quando a chave process.env.API_KEY estiver vazia.
@@ -131,9 +133,17 @@ const responseSchema = {
   required: ['analysisMetadata', 'nutritionalSummary', 'foods', 'hiddenIngredientsPossible', 'feedback', 'suggestions']
 };
 
-// ──────────────────────────────────────────────────────────────
-// Prompt multimodal — Baseado na SKILL.md (Prompts Base)
-// ──────────────────────────────────────────────────────────────
+const IDR_BRASIL: Record<string, number> = {
+  iron_mg: 14,
+  calcium_mg: 1000,
+  vitaminC_mg: 45,
+  vitaminD_mcg: 5,
+  magnesium_mg: 260,
+  potassium_mg: 2000,
+  zinc_mg: 7,
+  vitaminB12_mcg: 2.4,
+  fiber_g: 25,
+};
 
 function buildPrompt(userContext?: string): string {
   let prompt = `Você é um especialista em nutrição com foco em alimentação brasileira.
@@ -218,48 +228,192 @@ EXEMPLO: arroz 180 + feijão 95 + frango 165 = baseCalories: 440 ✓
   return prompt;
 }
 
-// ──────────────────────────────────────────────────────────────
-// Pós-processamento determinístico
-// (Skill: "nunca confiar no baseCalories da IA — recalcular")
-// ──────────────────────────────────────────────────────────────
-
 function enforceConsistency(result: AnalysisResult): AnalysisResult {
   if (!result.foods || result.foods.length === 0) {
     return result;
   }
 
-  // Recalcular calorias de cada alimento individualmente usando os fatores de Atwater
-  // (4 kcal/g para carboidratos e proteínas, 9 kcal/g para gorduras) para garantir 100% de consistência com os macros.
-  result.foods.forEach(food => {
+  let totalAntiInflammatory = 0;
+  let antiInflammatoryCount = 0;
+
+  const totalMicroValues = {
+    iron_mg: 0,
+    calcium_mg: 0,
+    vitaminC_mg: 0,
+    vitaminD_mcg: 0,
+    magnesium_mg: 0,
+    potassium_mg: 0,
+    zinc_mg: 0,
+    vitaminB12_mcg: 0,
+    fiber_g: 0,
+  };
+
+  result.foods.forEach((food, i) => {
+    if (!food.id) food.id = `food_${i + 1}`;
+    if (food.consumedFraction === undefined || food.consumedFraction === null) {
+      food.consumedFraction = 1.0;
+    }
+
+    // @ts-ignore
+    food.foodGroup = food.foodGroup || classifyFoodGroup(food.name) || 'outro';
+
+    const matchInfo = findTACOMatch(food.name);
+    if (matchInfo) {
+      const match = matchInfo.match;
+      const factor = food.estimatedWeightGrams / 100;
+
+      food.carbohydrates = Math.round(match.carbohydrates * factor * 10) / 10;
+      food.protein = Math.round(match.protein * factor * 10) / 10;
+      food.fat = Math.round(match.fat * factor * 10) / 10;
+      food.fiber = Math.round(match.fiber * factor * 10) / 10;
+      food.sugar = Math.round(match.sugar * factor * 10) / 10;
+      food.addedSugar = Math.round(match.addedSugar * factor * 10) / 10;
+      food.sodium = Math.round(match.sodium * factor);
+      food.saturatedFat = Math.round(match.saturatedFat * factor * 10) / 10;
+
+      // @ts-ignore
+      food.glycemicIndex = match.glycemicIndex;
+      // @ts-ignore
+      food.glycemicLoad = Math.round(((match.glycemicIndex * food.carbohydrates) / 100) * 10) / 10;
+
+      // @ts-ignore
+      food.fiberDetailed = {
+        total_g: food.fiber,
+        soluble_g: Math.round(food.fiber * 0.35 * 10) / 10,
+        insoluble_g: Math.round(food.fiber * 0.65 * 10) / 10,
+      };
+
+      const micro = {
+        iron_mg: +(match.iron_mg * factor).toFixed(2),
+        calcium_mg: +(match.calcium_mg * factor).toFixed(1),
+        vitaminC_mg: +(match.vitaminC_mg * factor).toFixed(1),
+        vitaminD_mcg: +(match.vitaminD_mcg * factor).toFixed(3),
+        magnesium_mg: +(match.magnesium_mg * factor).toFixed(1),
+        potassium_mg: +(match.potassium_mg * factor).toFixed(1),
+        zinc_mg: +(match.zinc_mg * factor).toFixed(2),
+        vitaminB12_mcg: +(match.vitaminB12_mcg * factor).toFixed(2),
+      };
+      // @ts-ignore
+      food.micronutrientsDetailed = micro;
+
+      const estimates: any[] = [];
+      Object.entries(micro).forEach(([key, val]) => {
+        const idrVal = IDR_BRASIL[key];
+        if (idrVal) {
+          const pct = Math.round((val / idrVal) * 100);
+          if (pct >= 5) {
+            const nameMap: Record<string, string> = {
+              iron_mg: 'Ferro',
+              calcium_mg: 'Cálcio',
+              vitaminC_mg: 'Vitamina C',
+              vitaminD_mcg: 'Vitamina D',
+              magnesium_mg: 'Magnésio',
+              potassium_mg: 'Potássio',
+              zinc_mg: 'Zinco',
+              vitaminB12_mcg: 'Vitamina B12',
+            };
+            const level = pct >= 30 ? 'alto' : pct >= 15 ? 'bom' : pct >= 5 ? 'moderado' : 'baixo';
+            estimates.push({ name: nameMap[key] || key, level, percentage: pct });
+          }
+        }
+      });
+      food.micronutrientEstimates = estimates.sort((a, b) => b.percentage - a.percentage);
+
+      // @ts-ignore
+      totalAntiInflammatory += match.antiInflammatoryScore;
+      antiInflammatoryCount++;
+
+      totalMicroValues.iron_mg += micro.iron_mg;
+      totalMicroValues.calcium_mg += micro.calcium_mg;
+      totalMicroValues.vitaminC_mg += micro.vitaminC_mg;
+      totalMicroValues.vitaminD_mcg += micro.vitaminD_mcg;
+      totalMicroValues.magnesium_mg += micro.magnesium_mg;
+      totalMicroValues.potassium_mg += micro.potassium_mg;
+      totalMicroValues.zinc_mg += micro.zinc_mg;
+      totalMicroValues.vitaminB12_mcg += micro.vitaminB12_mcg;
+    } else {
+      food.fiber = food.fiber || 0;
+      food.sugar = food.sugar || 0;
+      food.addedSugar = food.addedSugar || 0;
+      food.sodium = food.sodium || 0;
+      food.saturatedFat = food.saturatedFat || 0;
+
+      // @ts-ignore
+      food.glycemicIndex = food.glycemicIndex || (food.possibleAddedSugars ? 70 : 45);
+      // @ts-ignore
+      food.glycemicLoad = Math.round(((food.glycemicIndex * food.carbohydrates) / 100) * 10) / 10;
+
+      // @ts-ignore
+      food.fiberDetailed = {
+        total_g: food.fiber,
+        soluble_g: Math.round(food.fiber * 0.35 * 10) / 10,
+        insoluble_g: Math.round(food.fiber * 0.65 * 10) / 10,
+      };
+
+      const micro = {
+        iron_mg: 0,
+        calcium_mg: 0,
+        vitaminC_mg: 0,
+        vitaminD_mcg: 0,
+        magnesium_mg: 0,
+        potassium_mg: 0,
+        zinc_mg: 0,
+        vitaminB12_mcg: 0,
+      };
+
+      if (food.micronutrientEstimates) {
+        food.micronutrientEstimates.forEach(est => {
+          const nameClean = est.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          if (nameClean.includes('ferro')) micro.iron_mg = +(est.percentage / 100 * IDR_BRASIL.iron_mg).toFixed(2);
+          if (nameClean.includes('calcio')) micro.calcium_mg = +(est.percentage / 100 * IDR_BRASIL.calcium_mg).toFixed(1);
+          if (nameClean.includes('vitamina c')) micro.vitaminC_mg = +(est.percentage / 100 * IDR_BRASIL.vitaminC_mg).toFixed(1);
+          if (nameClean.includes('vitamina d')) micro.vitaminD_mcg = +(est.percentage / 100 * IDR_BRASIL.vitaminD_mcg).toFixed(3);
+          if (nameClean.includes('magnesio')) micro.magnesium_mg = +(est.percentage / 100 * IDR_BRASIL.magnesium_mg).toFixed(1);
+          if (nameClean.includes('potassio')) micro.potassium_mg = +(est.percentage / 100 * IDR_BRASIL.potassium_mg).toFixed(1);
+          if (nameClean.includes('zinco')) micro.zinc_mg = +(est.percentage / 100 * IDR_BRASIL.zinc_mg).toFixed(2);
+          if (nameClean.includes('vitamina b12')) micro.vitaminB12_mcg = +(est.percentage / 100 * IDR_BRASIL.vitaminB12_mcg).toFixed(2);
+        });
+      }
+      // @ts-ignore
+      food.micronutrientsDetailed = micro;
+
+      totalMicroValues.iron_mg += micro.iron_mg;
+      totalMicroValues.calcium_mg += micro.calcium_mg;
+      totalMicroValues.vitaminC_mg += micro.vitaminC_mg;
+      totalMicroValues.vitaminD_mcg += micro.vitaminD_mcg;
+      totalMicroValues.magnesium_mg += micro.magnesium_mg;
+      totalMicroValues.potassium_mg += micro.potassium_mg;
+      totalMicroValues.zinc_mg += micro.zinc_mg;
+      totalMicroValues.vitaminB12_mcg += micro.vitaminB12_mcg;
+      
+      totalAntiInflammatory += food.processingLevel === 'ultraprocessado' ? 2 : food.processingLevel === 'processado' ? 4 : 6;
+      antiInflammatoryCount++;
+    }
+
+    if (food.fiber === undefined || food.fiber === null) food.fiber = 0;
+    if (food.sugar === undefined || food.sugar === null) food.sugar = 0;
+    if (food.addedSugar === undefined || food.addedSugar === null) food.addedSugar = 0;
+    if (food.sodium === undefined || food.sodium === null) food.sodium = 0;
+    if (food.saturatedFat === undefined || food.saturatedFat === null) food.saturatedFat = 0;
+
     const carbCal = (food.carbohydrates || 0) * 4;
     const protCal = (food.protein || 0) * 4;
     const fatCal = (food.fat || 0) * 9;
     food.calories = Math.round(carbCal + protCal + fatCal);
   });
 
-  // Recalcular baseCalories como soma exata dos alimentos
-  const calculatedCalories = result.foods.reduce(
-    (sum, food) => sum + (food.calories || 0), 0
-  );
+  const calculatedCalories = result.foods.reduce((sum, food) => sum + (food.calories || 0), 0);
+  result.nutritionalSummary.baseCalories = calculatedCalories;
 
-  // Se a IA retornou baseCalories diferente, corrigir deterministicamente
-  if (result.nutritionalSummary.baseCalories !== calculatedCalories) {
-    console.warn(
-      `[NutritionAnalysis] Inconsistência corrigida: IA retornou baseCalories=${result.nutritionalSummary.baseCalories}, ` +
-      `soma real dos alimentos=${calculatedCalories}. Usando soma real.`
-    );
-    result.nutritionalSummary.baseCalories = calculatedCalories;
-  }
-
-  // Garantir maxPossibleCalories >= baseCalories
   if (result.nutritionalSummary.maxPossibleCalories < calculatedCalories) {
     result.nutritionalSummary.maxPossibleCalories = Math.round(calculatedCalories * 1.2);
   }
 
-  // Recalcular totais nutricionais detalhados (determinístico)
-  result.nutritionalSummary.totalFiber = Math.round(
-    result.foods.reduce((s, f) => s + (f.fiber || 0), 0) * 10
-  ) / 10;
+  const finalFiber = Math.round(result.foods.reduce((s, f) => s + (f.fiber || 0), 0) * 10) / 10;
+  result.nutritionalSummary.totalFiber = finalFiber;
+  // @ts-ignore
+  result.nutritionalSummary.fiberTotal_g = finalFiber;
+  
   result.nutritionalSummary.totalSugar = Math.round(
     result.foods.reduce((s, f) => s + (f.sugar || 0), 0) * 10
   ) / 10;
@@ -273,19 +427,21 @@ function enforceConsistency(result: AnalysisResult): AnalysisResult {
     result.foods.reduce((s, f) => s + (f.saturatedFat || 0), 0) * 10
   ) / 10;
 
-  // Garantir IDs únicos nos alimentos
-  result.foods.forEach((food, i) => {
-    if (!food.id) food.id = `food_${i + 1}`;
-    if (food.consumedFraction === undefined || food.consumedFraction === null) {
-      food.consumedFraction = 1.0;
-    }
-    // Garantir defaults para novos campos
-    if (food.fiber === undefined) food.fiber = 0;
-    if (food.sugar === undefined) food.sugar = 0;
-    if (food.addedSugar === undefined) food.addedSugar = 0;
-    if (food.sodium === undefined) food.sodium = 0;
-    if (food.saturatedFat === undefined) food.saturatedFat = 0;
+  // Fase 1: Calcular score anti-inflamatório médio
+  if (antiInflammatoryCount > 0) {
+    result.nutritionalSummary.antiInflammatoryScore = Math.round((totalAntiInflammatory / antiInflammatoryCount) * 10) / 10;
+  } else {
+    result.nutritionalSummary.antiInflammatoryScore = 5.0;
+  }
+
+  // Fase 1: Calcular percentuais de cobertura diária (% da IDR ANVISA)
+  totalMicroValues.fiber_g = finalFiber;
+  const dailyCoveragePercent: Record<string, number> = {};
+  Object.entries(IDR_BRASIL).forEach(([key, idr]) => {
+    const val = totalMicroValues[key as keyof typeof totalMicroValues] || 0;
+    dailyCoveragePercent[key] = Math.round((val / idr) * 100);
   });
+  result.nutritionalSummary.dailyCoveragePercent = dailyCoveragePercent;
 
   return result;
 }
@@ -370,6 +526,129 @@ export const analyzeImage = async (base64Image: string, userContext?: string): P
       const message = error instanceof Error ? error.message : 'Erro desconhecido';
       console.error('[NutritionAnalysis] Falha na análise via proxy:', message);
       throw new Error('Falha ao processar a imagem via servidor de produção. Tente novamente.');
+    }
+  }
+};
+
+export const generateWeeklyReportText = async (weekStats: any): Promise<{ highlight: string; attention: string; suggestion: string }> => {
+  const prompt = `Analise os padrões alimentares desta semana. Dados agregados (sem informação pessoal):
+${JSON.stringify(weekStats, null, 2)}
+
+Responda APENAS com um objeto JSON válido no seguinte formato:
+{
+  "highlight": "ponto mais positivo da semana (1-2 frases empáticas)",
+  "attention": "principal ponto de atenção (1-2 frases, sem julgamento)",
+  "suggestion": "sugestão prática e viável para a próxima semana"
+}
+
+Tom: empático, construtivo, leve. Nunca usar: "ruim", "errado", "proibido", "faz mal", "você errou", "não deveria". Começar com algo positivo.`;
+
+  const apiKey = process.env.API_KEY;
+
+  if (apiKey) {
+    try {
+      const localAi = new GoogleGenAI({ apiKey });
+      const response = await localAi.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [{ text: prompt }],
+        config: {
+          responseMimeType: "application/json",
+        }
+      });
+      const jsonText = response.text?.trim();
+      if (!jsonText) throw new Error('Resposta vazia da IA');
+      return JSON.parse(jsonText);
+    } catch (error) {
+      console.error('[WeeklyReport] Falha na análise local:', error);
+      throw new Error('Falha ao gerar o relatório localmente.');
+    }
+  } else {
+    const isLocalWebDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const hasCapacitor = window.hasOwnProperty('Capacitor') || window.location.protocol.startsWith('capacitor') || window.location.protocol.startsWith('http-case');
+    const proxyUrl = (isLocalWebDev && !hasCapacitor)
+      ? '/api/analyze'
+      : 'https://healthy.flavoscompany.xyz/api/analyze';
+
+    try {
+      const response = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          textPrompt: prompt
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Erro HTTP no proxy: ${response.status} - ${errorText}`);
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('[WeeklyReport] Falha no proxy:', error);
+      throw new Error('Falha ao gerar o relatório via servidor.');
+    }
+  }
+};
+
+export const generateCorrelationInsightText = async (stats: any): Promise<string | null> => {
+  const prompt = `Analise as correlações alimentares desta pessoa nos últimos 60 dias.
+Dados agregados (sem informação pessoal):
+${JSON.stringify(stats, null, 2)}
+
+Gere UM insight curto (2-3 frases) em português, identificando a correlação mais relevante e prática entre alimentação e bem-estar.
+
+Regras:
+- Tom encorajador, baseado em dados, sem julgamento médico.
+- Nunca diagnosticar condições de saúde.
+- Só gerar insight se houver algum bucket com >=5 amostras. Se não houver amostras suficientes, responda apenas: null.
+- Responder apenas com o texto do insight, sem prefácio, sem JSON.`;
+
+  const apiKey = process.env.API_KEY;
+
+  if (apiKey) {
+    try {
+      const localAi = new GoogleGenAI({ apiKey });
+      const response = await localAi.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [{ text: prompt }],
+      });
+      const text = response.text?.trim() || 'null';
+      return text === 'null' ? null : text;
+    } catch (error) {
+      console.error('[CorrelationInsight] Falha na análise local:', error);
+      return null;
+    }
+  } else {
+    const isLocalWebDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const hasCapacitor = window.hasOwnProperty('Capacitor') || window.location.protocol.startsWith('capacitor') || window.location.protocol.startsWith('http-case');
+    const proxyUrl = (isLocalWebDev && !hasCapacitor)
+      ? '/api/analyze'
+      : 'https://healthy.flavoscompany.xyz/api/analyze';
+
+    try {
+      const response = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          textPrompt: prompt
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Erro HTTP no proxy: ${response.status}`);
+      }
+
+      const parsed = await response.json();
+      const text = (typeof parsed === 'string' ? parsed : (parsed.text || parsed.insight || JSON.stringify(parsed))).trim();
+      return text === 'null' ? null : text;
+    } catch (error) {
+      console.error('[CorrelationInsight] Falha no proxy:', error);
+      return null;
     }
   }
 };

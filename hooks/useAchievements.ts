@@ -3,10 +3,10 @@
  *
  * Conquistas disponíveis (baseadas na Documentacao_Tecnica.md):
  * - first_log: Primeira refeição registrada
- * - streak_3: 3 dias consecutivos
- * - streak_7: 7 dias consecutivos
- * - streak_30: 30 dias consecutivos
- * - goal_week: Meta calórica atingida por 7 dias
+ * - streak_3: 3 dias consecutivos (consistencyStreak >= 3)
+ * - streak_7: 7 dias consecutivos (consistencyStreak >= 7)
+ * - streak_30: 30 dias consecutivos (consistencyStreak >= 30)
+ * - goal_week: Meta calórica atingida por 7 dias (calorieGoalStreak >= 7)
  * - diversity_80: Score de diversidade ≥ 80
  * - profile_complete: Perfil físico preenchido
  * - water_goal: Meta de água atingida
@@ -15,6 +15,7 @@
  */
 import { useMemo, useEffect, useRef } from 'react';
 import type { HistoryEntry } from '../types';
+import { useStreaks } from './useStreaks';
 
 export interface Achievement {
   id: string;
@@ -51,39 +52,6 @@ function unlock(id: string): StoredAchievements {
   return stored;
 }
 
-function calcStreak(history: HistoryEntry[]): number {
-  if (history.length === 0) return 0;
-  const days = [
-    ...new Set(
-      history.map((e) => {
-        const d = new Date(e.date);
-        return `${d.getFullYear()}-${String(d.getMonth()).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-      }),
-    ),
-  ].sort().reverse();
-
-  const today = new Date();
-  const firstDay = new Date(history.find((e) => {
-    const d = new Date(e.date);
-    return `${d.getFullYear()}-${String(d.getMonth()).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` === days[0];
-  })!.date);
-
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth()).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-  const yesterdayStr = (() => { const y = new Date(today); y.setDate(y.getDate()-1); return `${y.getFullYear()}-${String(y.getMonth()).padStart(2,'0')}-${String(y.getDate()).padStart(2,'0')}`; })();
-
-  if (days[0] !== todayStr && days[0] !== yesterdayStr) return 0;
-
-  let count = 1;
-  for (let i = 1; i < days.length; i++) {
-    const prev = new Date(days[i-1]);
-    const curr = new Date(days[i]);
-    const diff = Math.round((prev.getTime() - curr.getTime()) / 86400000);
-    if (diff === 1) count++;
-    else break;
-  }
-  return count;
-}
-
 export interface AchievementsContext {
   diversityScore?: number;
   hasProfile?: boolean;
@@ -95,7 +63,7 @@ export function useAchievements(
   ctx: AchievementsContext = {}
 ): Achievement[] {
   const stored = useRef<StoredAchievements>(loadStored());
-  const streak = useMemo(() => calcStreak(history), [history]);
+  const { consistencyStreak, calorieGoalStreak } = useStreaks(history);
   const totalMeals = history.length;
 
   // Checar e desbloquear conquistas automaticamente
@@ -111,13 +79,14 @@ export function useAchievements(
     check('first_log', totalMeals >= 1);
     check('meals_10', totalMeals >= 10);
     check('meals_50', totalMeals >= 50);
-    check('streak_3', streak >= 3);
-    check('streak_7', streak >= 7);
-    check('streak_30', streak >= 30);
+    check('streak_3', consistencyStreak >= 3);
+    check('streak_7', consistencyStreak >= 7);
+    check('streak_30', consistencyStreak >= 30);
+    check('goal_week', calorieGoalStreak >= 7);
     check('diversity_80', (ctx.diversityScore ?? 0) >= 80);
     check('profile_complete', ctx.hasProfile === true);
     check('water_goal', ctx.waterGoalMet === true);
-  }, [history, streak, totalMeals, ctx.diversityScore, ctx.hasProfile, ctx.waterGoalMet]);
+  }, [history, consistencyStreak, calorieGoalStreak, totalMeals, ctx.diversityScore, ctx.hasProfile, ctx.waterGoalMet]);
 
   const DEFINITIONS = [
     {
@@ -138,27 +107,35 @@ export function useAchievements(
     },
     {
       id: 'streak_3',
-      title: '3 Dias Seguidos',
-      description: '3 dias consecutivos com refeições registradas.',
+      title: 'Foco Inicial (3 Dias)',
+      description: '3 dias seguidos registrando pelo menos 2 refeições diárias.',
       emoji: '🔥',
       target: 3,
-      getCurrent: () => Math.min(streak, 3),
+      getCurrent: () => Math.min(consistencyStreak, 3),
     },
     {
       id: 'streak_7',
-      title: 'Semana Consistente',
-      description: '7 dias consecutivos com refeições registradas.',
+      title: 'Consistência Semanal',
+      description: '7 dias seguidos registrando pelo menos 2 refeições diárias.',
       emoji: '🏆',
       target: 7,
-      getCurrent: () => Math.min(streak, 7),
+      getCurrent: () => Math.min(consistencyStreak, 7),
     },
     {
       id: 'streak_30',
-      title: 'Mês Consistente',
-      description: '30 dias consecutivos com refeições registradas.',
+      title: 'Hábito Consolidado (30 Dias)',
+      description: '30 dias seguidos registrando pelo menos 2 refeições diárias.',
       emoji: '💎',
       target: 30,
-      getCurrent: () => Math.min(streak, 30),
+      getCurrent: () => Math.min(consistencyStreak, 30),
+    },
+    {
+      id: 'goal_week',
+      title: 'Meta Sob Controle',
+      description: '7 dias seguidos consumindo dentro da margem de ±15% da sua meta calórica.',
+      emoji: '⚖️',
+      target: 7,
+      getCurrent: () => Math.min(calorieGoalStreak, 7),
     },
     {
       id: 'meals_10',
@@ -179,7 +156,7 @@ export function useAchievements(
     {
       id: 'diversity_80',
       title: 'Prato Colorido',
-      description: 'Score de diversidade alimentar ≥ 80 em uma semana.',
+      description: 'Score de diversidade alimentar semanal ≥ 80.',
       emoji: '🌈',
       target: 80,
       getCurrent: () => Math.min(ctx.diversityScore ?? 0, 80),

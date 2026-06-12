@@ -168,15 +168,37 @@ Siga rigorosamente as diretrizes abaixo:
 }
 
 export default async function handler(req: any, res: any) {
-  // CORS
-  const origin = req.headers.origin || '*';
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  // ── CORS com allowlist explícita ───────────────────────────────────────
+  // NUNCA usar `origin` refletido — isso equivale a Allow-Origin: * com credenciais.
+  // Adicione aqui os domínios autorizados a chamar este proxy.
+  const ALLOWED_ORIGINS = [
+    'https://healthy.flavoscompany.xyz',    // Produção web
+    'capacitor://localhost',                // APK Android (Capacitor)
+    'http://localhost:5173',               // Desenvolvimento local (Vite)
+    'http://localhost:4173',               // Vite preview
+  ];
+
+  const requestOrigin = req.headers.origin || '';
+  const isAllowed = ALLOWED_ORIGINS.includes(requestOrigin);
+
+  // Só seta o header se a origem for permitida
+  if (isAllowed) {
+    res.setHeader('Access-Control-Allow-Origin', requestOrigin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  } else {
+    // Origem não autorizada: responde sem o header de CORS
+    // (o browser vai bloquear a requisição)
+    if (req.method === 'OPTIONS') {
+      return res.status(403).end();
+    }
+  }
+
+  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+    'Accept, Content-Type, Content-Length'
   );
+  res.setHeader('X-Content-Type-Options', 'nosniff');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -186,10 +208,33 @@ export default async function handler(req: any, res: any) {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  const { imageBase64, userContext } = req.body;
+  const { imageBase64, userContext, textPrompt } = req.body;
 
-  if (!imageBase64) {
-    return res.status(400).json({ error: 'Imagem base64 é obrigatória' });
+  if (!imageBase64 && !textPrompt) {
+    return res.status(400).json({ error: 'Imagem base64 ou prompt de texto é obrigatório' });
+  }
+
+  // ── Validação de tamanho de payload (anti-DoS) ─────────────────────────
+  // imageBase64: imagem 1280px JPEG ~0.75 qual ≈ ~500 KB → base64 ≈ 680 KB
+  // Limite generoso de 2 MB para absorver variações de qualidade
+  const MAX_IMAGE_B64_CHARS = 2 * 1024 * 1024; // 2 MB em caracteres base64
+  const MAX_CONTEXT_CHARS = 500;
+  const MAX_TEXT_PROMPT_CHARS = 8000;
+
+  if (imageBase64 && typeof imageBase64 !== 'string') {
+    return res.status(422).json({ error: 'imageBase64 deve ser uma string' });
+  }
+  if (imageBase64 && imageBase64.length > MAX_IMAGE_B64_CHARS) {
+    return res.status(413).json({ error: 'Imagem muito grande. Limite: 2 MB.' });
+  }
+  if (userContext && (typeof userContext !== 'string' || userContext.length > MAX_CONTEXT_CHARS)) {
+    return res.status(422).json({ error: 'Contexto do usuário muito longo. Limite: 500 caracteres.' });
+  }
+  if (textPrompt && typeof textPrompt !== 'string') {
+    return res.status(422).json({ error: 'textPrompt deve ser uma string' });
+  }
+  if (textPrompt && textPrompt.length > MAX_TEXT_PROMPT_CHARS) {
+    return res.status(413).json({ error: 'Prompt de texto muito longo. Limite: 8.000 caracteres.' });
   }
 
   const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
@@ -202,32 +247,49 @@ export default async function handler(req: any, res: any) {
   try {
     const ai = new GoogleGenAI({ apiKey });
     
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.1-flash-lite',
-      contents: [
-        {
-          inlineData: {
-            mimeType: 'image/jpeg',
-            data: imageBase64
-          }
-        },
-        { text: buildPrompt(userContext) }
-      ],
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: responseSchema
+    if (textPrompt) {
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [{ text: textPrompt }]
+      });
+      const textVal = response.text?.trim();
+      if (!textVal) {
+        throw new Error('Resposta vazia da IA');
       }
-    });
+      try {
+        const parsed = JSON.parse(textVal);
+        return res.status(200).json(parsed);
+      } catch {
+        return res.status(200).json({ text: textVal });
+      }
+    } else {
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.1-flash-lite',
+        contents: [
+          {
+            inlineData: {
+              mimeType: 'image/jpeg',
+              data: imageBase64
+            }
+          },
+          { text: buildPrompt(userContext) }
+        ],
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: responseSchema
+        }
+      });
 
-    const jsonText = response.text?.trim();
-    if (!jsonText) {
-      throw new Error('Resposta vazia da IA');
+      const jsonText = response.text?.trim();
+      if (!jsonText) {
+        throw new Error('Resposta vazia da IA');
+      }
+
+      const parsed = JSON.parse(jsonText);
+      return res.status(200).json(parsed);
     }
-
-    const parsed = JSON.parse(jsonText);
-    return res.status(200).json(parsed);
   } catch (error: any) {
-    console.error('Erro na análise da imagem no proxy:', error);
-    return res.status(500).json({ error: error.message || 'Erro interno ao processar a imagem' });
+    console.error('Erro no proxy de IA:', error);
+    return res.status(500).json({ error: error.message || 'Erro interno ao processar a requisição' });
   }
 }

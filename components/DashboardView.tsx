@@ -20,6 +20,8 @@ import { useWeight } from '../hooks/useWeight';
 import { useStreaks } from '../hooks/useStreaks';
 import { useAchievements } from '../hooks/useAchievements';
 import { useFoodDiversity } from '../hooks/useFoodDiversity';
+import { useUserProfile } from '../hooks/useUserProfile';
+import { useWeeklyReports } from '../hooks/useWeeklyReports';
 import CalorieRing from './CalorieRing';
 import MacroCards from './MacroCards';
 import HydrationTracker from './HydrationTracker';
@@ -27,6 +29,9 @@ import WeightTracker from './WeightTracker';
 import StreakBadge from './StreakBadge';
 import AchievementsPanel from './AchievementsPanel';
 import DiversityPanel from './DiversityPanel';
+import { MealPlanPanel } from './MealPlanPanel';
+import WeeklyReportCard from './WeeklyReportCard';
+import WellbeingPanel from './WellbeingPanel';
 
 interface DashboardViewProps {
   history: HistoryEntry[];
@@ -47,8 +52,10 @@ const DashboardView: React.FC<DashboardViewProps> = ({
   const { macros } = useDailyStats(history);
   const hydration = useHydration(isSyncEnabled);
   const weight = useWeight(isSyncEnabled);
-  const streak = useStreaks(history);
+  const { consistencyStreak, calorieGoalStreak } = useStreaks(history);
   const { weeklyDiversity, eatingWindow } = useFoodDiversity(history);
+  const { profile, targets } = useUserProfile();
+  const { latestReport, generateReportManually, isGenerating, error } = useWeeklyReports(history);
 
   const waterGoalMet = hydration.percentage >= 100;
   const achievements = useAchievements(history, {
@@ -125,7 +132,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
       )}
 
       {/* Streak */}
-      <StreakBadge streak={streak} />
+      <StreakBadge consistencyStreak={consistencyStreak} calorieGoalStreak={calorieGoalStreak} />
 
       {/* Calorie ring */}
       <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-5 flex flex-col items-center gap-2">
@@ -166,11 +173,26 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         onAdd={weight.addWeight}
       />
 
+      {/* Plano de Refeições (Fase 2) */}
+      {profile && targets && (
+        <MealPlanPanel profile={profile} targets={targets} />
+      )}
+
       {/* Diversidade alimentar + janela (Fase 3) */}
-      <div>
-        <p className="text-xs text-gray-500 font-medium mb-2 pl-1">Qualidade Alimentar</p>
+      <div className="space-y-3">
+        <p className="text-xs text-gray-500 font-medium pl-1 mb-0">Qualidade Alimentar</p>
         <DiversityPanel diversity={weeklyDiversity} eatingWindow={eatingWindow} />
+        <WeeklyReportCard
+          report={latestReport}
+          isGenerating={isGenerating}
+          onGenerate={generateReportManually}
+          error={error}
+          hasMinimumHistory={history.length >= 3}
+        />
       </div>
+
+      {/* Correlações e Bem-Estar (Fase 4) */}
+      <WellbeingPanel history={history} />
 
       {/* Conquistas */}
       <AchievementsPanel achievements={achievements} />

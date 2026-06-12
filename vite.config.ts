@@ -15,6 +15,14 @@ export default defineConfig(({ mode }) => {
       outDir: 'dist',
       sourcemap: false,
     },
+    optimizeDeps: {
+      entries: ['index.html'],
+    },
+    server: {
+      watch: {
+        ignored: ['**/android/**'],
+      },
+    },
     // Define variáveis globais para o código do cliente
     define: {
       // Em produção (build final), a chave NUNCA é injetada no bundle do cliente para segurança contra vazamentos no APK.

@@ -8,7 +8,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { UserProfile, ActivityLevel, Goal, Sex } from '../hooks/useUserProfile';
-import { calcTargets, saveUserProfile } from '../hooks/useUserProfile';
+import { calcTargets, saveUserProfile, carbLoadStrategy } from '../hooks/useUserProfile';
 import { saveGoals } from '../hooks/useDailyStats';
 
 interface Props {
@@ -299,11 +299,11 @@ const OnboardingModal: React.FC<Props> = ({ onComplete, onSkip }) => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-3 gap-2 mt-4">
                   {[
-                    { label: 'Proteína', g: targets.targetProtein_g, color: 'text-blue-400', pct: '30%' },
-                    { label: 'Carbs', g: targets.targetCarbs_g, color: 'text-yellow-400', pct: '45%' },
-                    { label: 'Gordura', g: targets.targetFat_g, color: 'text-orange-400', pct: '25%' },
+                    { label: 'Proteína', g: targets.targetProtein_g, color: 'text-blue-400', pct: `${Math.round((targets.targetProtein_g * 4 / (targets.targetProtein_g * 4 + targets.targetCarbs_g * 4 + targets.targetFat_g * 9)) * 100)}%` },
+                    { label: 'Carbs', g: targets.targetCarbs_g, color: 'text-yellow-400', pct: `${Math.round((targets.targetCarbs_g * 4 / (targets.targetProtein_g * 4 + targets.targetCarbs_g * 4 + targets.targetFat_g * 9)) * 100)}%` },
+                    { label: 'Gordura', g: targets.targetFat_g, color: 'text-orange-400', pct: `${Math.round((targets.targetFat_g * 9 / (targets.targetProtein_g * 4 + targets.targetCarbs_g * 4 + targets.targetFat_g * 9)) * 100)}%` },
                   ].map(m => (
                     <div key={m.label} className="bg-gray-800/60 rounded-xl p-3 border border-gray-700/50 text-center">
                       <p className="text-xs text-gray-500">{m.label}</p>
@@ -313,11 +313,21 @@ const OnboardingModal: React.FC<Props> = ({ onComplete, onSkip }) => {
                   ))}
                 </div>
 
-                <p className="text-xs text-gray-600 text-center">
+                {/* Carb Load strategy tip if g/kg > 6 */}
+                {targets.targetCarbs_g / weightKg > 6 && (
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-4 mt-3 text-left">
+                    <p className="text-xs font-bold text-emerald-400 mb-1">💡 Estratégia de Carga de Carbo ({Math.round(targets.targetCarbs_g / weightKg)} g/kg)</p>
+                    <p className="text-xs text-gray-300 leading-relaxed">
+                      {carbLoadStrategy(targets.targetCarbs_g, weightKg, 4).tip}
+                    </p>
+                  </div>
+                )}
+
+                <p className="text-xs text-gray-600 text-center mt-3">
                   Estas são estimativas educacionais. Para orientação clínica, consulte um nutricionista.
                 </p>
 
-                <button onClick={handleComplete} className="w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 text-white font-bold text-lg hover:opacity-90 transition-all shadow-xl shadow-emerald-900/30 mt-1">
+                <button onClick={handleComplete} className="w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 text-white font-bold text-lg hover:opacity-90 transition-all shadow-xl shadow-emerald-900/30 mt-3">
                   Começar! 🚀
                 </button>
               </motion.div>

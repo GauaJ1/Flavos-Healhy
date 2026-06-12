@@ -32,12 +32,36 @@ export function useWeight(syncEnabled: boolean = false) {
 
   const weekTrend = (() => {
     if (entries.length < 2) return null;
+    
+    // Filtra entradas dos últimos 30 dias para ter dados suficientes para regressão
     const now = Date.now();
-    const weekAgo = now - 7 * 86400000;
-    const recent = entries.filter((e) => new Date(e.date).getTime() >= weekAgo);
+    const limitTime = now - 30 * 86400000;
+    const recent = entries.filter((e) => new Date(e.date).getTime() >= limitTime);
     if (recent.length < 2) return null;
-    const diff = recent[recent.length - 1].kg - recent[0].kg;
-    return Math.round(diff * 10) / 10;
+
+    // X: tempo em dias relativo à primeira entrada do período
+    const t0 = new Date(recent[0].date).getTime();
+    const data = recent.map(e => ({
+      x: (new Date(e.date).getTime() - t0) / 86400000, // em dias
+      y: e.kg
+    }));
+
+    const n = data.length;
+    let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+    for (const pt of data) {
+      sumX += pt.x;
+      sumY += pt.y;
+      sumXY += pt.x * pt.y;
+      sumXX += pt.x * pt.x;
+    }
+
+    const denominator = n * sumXX - sumX * sumX;
+    if (denominator === 0) return 0;
+
+    const slope = (n * sumXY - sumX * sumY) / denominator; // kg por dia
+    const weeklyChange = slope * 7; // kg por semana
+
+    return Math.round(weeklyChange * 10) / 10;
   })();
 
   const addWeight = useCallback(

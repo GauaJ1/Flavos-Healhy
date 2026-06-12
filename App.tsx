@@ -61,6 +61,22 @@ const App: React.FC = () => {
   const { history, addHistoryEntry, removeHistoryEntry } = useMealHistory();
   const healthSync = useHealthSync();
   const { profile, targets, hasProfile, updateProfile } = useUserProfile();
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Escutar evento de relatório semanal
+  useEffect(() => {
+    const handleWeeklyReport = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      setToastMessage(customEvent.detail.message);
+      setTimeout(() => {
+        setToastMessage(null);
+      }, 5000);
+    };
+    window.addEventListener('flavos-weekly-report-ready', handleWeeklyReport);
+    return () => {
+      window.removeEventListener('flavos-weekly-report-ready', handleWeeklyReport);
+    };
+  }, []);
 
   // Dark mode
   useEffect(() => {
@@ -322,6 +338,21 @@ const App: React.FC = () => {
   // ── Main render ───────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-[#111827] font-sans text-gray-200 flex flex-col bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-gray-800 via-gray-900 to-black">
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {toastMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: -50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.9 }}
+            className="fixed top-6 left-4 right-4 z-50 max-w-sm mx-auto bg-gray-900/90 border border-emerald-500/30 text-white px-4 py-3 rounded-2xl shadow-2xl backdrop-blur-md flex items-center gap-3 border-l-4 border-l-emerald-500"
+          >
+            <span className="text-emerald-400 text-lg">🔔</span>
+            <p className="text-xs font-semibold leading-normal">{toastMessage}</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {showTutorial && <TutorialModal onClose={() => setShowTutorial(false)} />}
       {showOnboarding && (
         <OnboardingModal
