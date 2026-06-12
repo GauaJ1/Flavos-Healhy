@@ -249,7 +249,7 @@ export default async function handler(req: any, res: any) {
     
     if (textPrompt) {
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3.1-flash-lite',
         contents: [{ text: textPrompt }]
       });
       const textVal = response.text?.trim();

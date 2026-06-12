@@ -9,7 +9,7 @@
  *   - Banner de redistribuição
  *   - Highlight visual nos macros alterados
  */
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { UserProfile, NutritionalTargets, MealConfig } from '../hooks/useUserProfile';
 import { distributeMeals, carbLoadStrategy } from '../hooks/useUserProfile';
@@ -20,6 +20,7 @@ import {
 } from '../utils/macros';
 import type { FixedMeal, MealPlanEntry } from '../utils/macros';
 import type { AnalysisResult } from '../types';
+import { generateMealSuggestions } from '../services/geminiService';
 
 // ──────────────────────────────────────────────────────────────
 // Types
@@ -270,6 +271,7 @@ interface MealCardProps {
   onUnlock: () => void;
   onSave: () => void;
   hasTemplates: boolean;
+  userGoal: string;
 }
 
 const MealCard: React.FC<MealCardProps> = ({
@@ -279,9 +281,32 @@ const MealCard: React.FC<MealCardProps> = ({
   onLock,
   onUnlock,
   onSave,
+  userGoal,
 }) => {
-  const suggestions = MEAL_SUGGESTIONS[meal.type] || [];
+  const [dynSuggestions, setDynSuggestions] = useState<string[]>([]);
+  const [loadingSug, setLoadingSug] = useState(false);
   const kcal = meal.protein_g * 4 + meal.carbs_g * 4 + meal.fat_g * 9;
+
+  useEffect(() => {
+    if (isExpanded && dynSuggestions.length === 0) {
+      setLoadingSug(true);
+      generateMealSuggestions(
+        meal.type,
+        meal.role,
+        { protein: meal.protein_g, carbs: meal.carbs_g, fat: meal.fat_g, kcal },
+        userGoal
+      )
+        .then((sugs) => {
+          setDynSuggestions(sugs);
+        })
+        .catch(() => {
+          setDynSuggestions(MEAL_SUGGESTIONS[meal.type] || []);
+        })
+        .finally(() => {
+          setLoadingSug(false);
+        });
+    }
+  }, [isExpanded, meal.type, meal.role, meal.protein_g, meal.carbs_g, meal.fat_g, kcal, userGoal]);
 
   const getRoleBadge = (role: string) => {
     switch (role) {
@@ -368,18 +393,28 @@ const MealCard: React.FC<MealCardProps> = ({
           >
             <div className="px-4 pt-3 pb-4 space-y-3">
               {/* Sugestões */}
-              {suggestions.length > 0 && (
+              {(loadingSug || dynSuggestions.length > 0) && (
                 <div>
-                  <p className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider mb-1.5">
-                    Sugestões de Refeição (Referências TACO)
+                  <p className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                    Sugestões Inteligentes (Flavos IA + TACO)
+                    {loadingSug && (
+                      <span className="inline-block w-2.5 h-2.5 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
+                    )}
                   </p>
                   <ul className="space-y-1.5">
-                    {suggestions.map((sug, sIdx) => (
-                      <li key={sIdx} className="text-xs text-gray-300 flex items-start gap-2">
-                        <span className="text-emerald-500 mt-0.5">•</span>
-                        <span>{sug}</span>
-                      </li>
-                    ))}
+                    {loadingSug ? (
+                      <>
+                        <li className="text-xs text-gray-400 animate-pulse bg-gray-800/40 rounded h-4 w-3/4"></li>
+                        <li className="text-xs text-gray-400 animate-pulse bg-gray-800/40 rounded h-4 w-2/3"></li>
+                      </>
+                    ) : (
+                      dynSuggestions.map((sug, sIdx) => (
+                        <li key={sIdx} className="text-xs text-gray-300 flex items-start gap-2">
+                          <span className="text-emerald-500 mt-0.5">•</span>
+                          <span>{sug}</span>
+                        </li>
+                      ))
+                    )}
                   </ul>
                 </div>
               )}
@@ -464,7 +499,23 @@ export const MealPlanPanel: React.FC<MealPlanPanelProps> = ({
       { type: 'Jantar',        role: 'normal' },
       { type: 'Ceia',          role: 'normal' },
     ];
-    return baseMeals.slice(0, Math.max(4, count));
+    const sliced = baseMeals.slice(0, Math.max(4, count));
+    const configs = [...sliced];
+
+    // Se alguma refeição está fixada, garantimos que ela seja incluída para que suas calorias
+    // sejam consideradas e exibidas visualmente.
+    baseMeals.forEach((bm) => {
+      if (fixedMeals[bm.type] && !configs.some(c => c.type === bm.type)) {
+        configs.push(bm);
+      }
+    });
+
+    // Ordenar de acordo com a ordem original do dia (cronológica)
+    return configs.sort((a, b) => {
+      const idxA = baseMeals.findIndex(m => m.type === a.type);
+      const idxB = baseMeals.findIndex(m => m.type === b.type);
+      return idxA - idxB;
+    });
   };
 
   const allMealConfigs = getMealConfigs(recommendedCount);
@@ -647,6 +698,7 @@ export const MealPlanPanel: React.FC<MealPlanPanelProps> = ({
               onUnlock={() => handleUnlock(meal.type)}
               onSave={() => setSavingMealType(meal.type)}
               hasTemplates={savedTemplates.length > 0}
+              userGoal={profile.goal}
             />
           ))}
         </div>

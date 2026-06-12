@@ -549,7 +549,7 @@ Tom: empático, construtivo, leve. Nunca usar: "ruim", "errado", "proibido", "fa
     try {
       const localAi = new GoogleGenAI({ apiKey });
       const response = await localAi.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3.1-flash-lite',
         contents: [{ text: prompt }],
         config: {
           responseMimeType: "application/json",
@@ -612,7 +612,7 @@ Regras:
     try {
       const localAi = new GoogleGenAI({ apiKey });
       const response = await localAi.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3.1-flash-lite',
         contents: [{ text: prompt }],
       });
       const text = response.text?.trim() || 'null';
@@ -651,4 +651,112 @@ Regras:
       return null;
     }
   }
+};
+
+const STATIC_FALLBACK_SUGGESTIONS: Record<string, string[]> = {
+  'Café da manhã': ['Pão francês com queijo minas ou ovos mexidos', 'Fruta (banana ou mamão) + café sem açúcar'],
+  'Almoço': ['Arroz branco/integral (150g) + feijão carioca (100g)', 'Grelhado (frango ou carne, 120g) + salada de folhas à vontade'],
+  'Lanche da tarde': ['Tapioca (50g) com queijo ou banana amassada com aveia (30g)', 'Iogurte natural ou mix de castanhas (30g)'],
+  'Shake Pós-treino': ['Vitamina de leite integral/desnatado + banana + aveia + mel', 'Whey protein + tapioca com frango desfiado'],
+  'Jantar': ['Arroz (120g) + feijão (100g) + filé de frango/peixe (120g)', 'Legumes cozidos no vapor (brócolis e cenoura) + azeite'],
+  'Ceia': ['Abacate com limão ou mel (100g)', 'Iogurte natural com um punhado de granola'],
+};
+
+export const generateMealSuggestions = async (
+  mealType: string,
+  role: string,
+  targets: { protein: number; carbs: number; fat: number; kcal: number },
+  userGoal: string
+): Promise<string[]> => {
+  const cacheKey = `meal_sug_${mealType.replace(/\s/g, '_')}_${role}_${targets.protein}_${targets.carbs}_${targets.fat}_${userGoal}`;
+  try {
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      return JSON.parse(cached);
+    }
+  } catch {}
+
+  const prompt = `Você é um nutricionista focado em sugestões baseadas na tabela TACO e diretrizes de nutrição esportiva.
+Gere exatamente 2 sugestões práticas de alimentos/refeições em português para a refeição "${mealType}" (papel: ${role}), que ajudem a atingir aproximadamente as seguintes metas:
+- Calorias: ~${targets.kcal} kcal
+- Proteínas: ~${targets.protein}g
+- Carboidratos: ~${targets.carbs}g
+- Gorduras: ~${targets.fat}g
+
+Objetivo geral do usuário: ${userGoal.replace('_', ' ')}.
+
+Regras das sugestões:
+1. Devem ser opções realistas e comuns no Brasil (ex: pão, frango, arroz, feijão, banana, ovos, aveia).
+2. Devem especificar porções ou quantidades estimadas aproximadas (ex: "150g de arroz + 100g de feijão + 120g de peito de frango grelhado").
+3. NUNCA faça julgamentos morais ("bom", "ruim", "proibido", "correto").
+4. Se o carboidrato for alto (> 80g para esta refeição), sugira fontes densas (aveia, tapioca, granola, banana, mel) ou opções líquidas/vitaminas se for pós-treino.
+5. Se for pré/pós-treino, atente-se a menor quantidade de gorduras e fibras para acelerar a absorção de nutrientes.
+
+Retorne APENAS um array JSON de strings com as 2 sugestões de refeições, sem qualquer outra introdução ou explicação.
+Formato de resposta esperado: ["Sugestão 1...", "Sugestão 2..."]`;
+
+  const apiKey = process.env.API_KEY;
+  let suggestions: string[] = [];
+
+  if (apiKey) {
+    try {
+      const localAi = new GoogleGenAI({ apiKey });
+      const response = await localAi.models.generateContent({
+        model: 'gemini-3.1-flash-lite',
+        contents: [{ text: prompt }],
+        config: {
+          responseMimeType: "application/json",
+        }
+      });
+      const jsonText = response.text?.trim();
+      if (jsonText) {
+        suggestions = JSON.parse(jsonText);
+      }
+    } catch (error) {
+      console.error('[MealSuggestions] Falha na análise local:', error);
+    }
+  } else {
+    const isLocalWebDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const hasCapacitor = window.hasOwnProperty('Capacitor') || window.location.protocol.startsWith('capacitor') || window.location.protocol.startsWith('http-case');
+    const proxyUrl = (isLocalWebDev && !hasCapacitor)
+      ? '/api/analyze'
+      : 'https://healthy.flavoscompany.xyz/api/analyze';
+
+    try {
+      const response = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          textPrompt: prompt
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (Array.isArray(data)) {
+          suggestions = data;
+        } else if (data.text) {
+          suggestions = JSON.parse(data.text);
+        }
+      }
+    } catch (error) {
+      console.error('[MealSuggestions] Falha no proxy:', error);
+    }
+  }
+
+  // Fallback se a IA falhar
+  if (!suggestions || suggestions.length === 0) {
+    suggestions = STATIC_FALLBACK_SUGGESTIONS[mealType] || [
+      'Refeição equilibrada com fontes de proteína magra e vegetais.'
+    ];
+  }
+
+  // Cache o resultado
+  try {
+    localStorage.setItem(cacheKey, JSON.stringify(suggestions));
+  } catch {}
+
+  return suggestions;
 };
