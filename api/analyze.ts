@@ -173,7 +173,9 @@ export default async function handler(req: any, res: any) {
   // Adicione aqui os domínios autorizados a chamar este proxy.
   const ALLOWED_ORIGINS = [
     'https://healthy.flavoscompany.xyz',    // Produção web
-    'capacitor://localhost',                // APK Android (Capacitor)
+    'capacitor://localhost',                // APK Android (Capacitor — protocolo nativo)
+    'https://localhost',                    // APK Android (Capacitor — WebView com androidScheme: https)
+    'http://localhost',                     // APK Android (Capacitor — WebView com androidScheme: http)
     'http://localhost:5173',               // Desenvolvimento local (Vite)
     'http://localhost:4173',               // Vite preview
   ];

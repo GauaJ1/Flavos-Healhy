@@ -272,6 +272,8 @@ interface MealCardProps {
   onSave: () => void;
   hasTemplates: boolean;
   userGoal: string;
+  /** Incrementar para forçar re-fetch das sugestões de IA */
+  refreshKey: number;
 }
 
 const MealCard: React.FC<MealCardProps> = ({
@@ -282,10 +284,16 @@ const MealCard: React.FC<MealCardProps> = ({
   onUnlock,
   onSave,
   userGoal,
+  refreshKey,
 }) => {
   const [dynSuggestions, setDynSuggestions] = useState<string[]>([]);
   const [loadingSug, setLoadingSug] = useState(false);
   const kcal = meal.protein_g * 4 + meal.carbs_g * 4 + meal.fat_g * 9;
+
+  // Limpar sugestões quando refreshKey muda (forçar re-fetch)
+  useEffect(() => {
+    setDynSuggestions([]);
+  }, [refreshKey]);
 
   useEffect(() => {
     if (isExpanded && dynSuggestions.length === 0) {
@@ -306,7 +314,7 @@ const MealCard: React.FC<MealCardProps> = ({
           setLoadingSug(false);
         });
     }
-  }, [isExpanded, meal.type, meal.role, meal.protein_g, meal.carbs_g, meal.fat_g, kcal, userGoal]);
+  }, [isExpanded, meal.type, meal.role, meal.protein_g, meal.carbs_g, meal.fat_g, kcal, userGoal, refreshKey]);
 
   const getRoleBadge = (role: string) => {
     switch (role) {
@@ -467,6 +475,22 @@ export const MealPlanPanel: React.FC<MealPlanPanelProps> = ({
   const [hasTraining, setHasTraining] = useState<boolean>(profile.activityLevel !== 'sedentario');
   const [expandedMeal, setExpandedMeal] = useState<string | null>(null);
   const [fixedMeals, setFixedMeals] = useState<Record<string, FixedMeal>>({} as Record<string, FixedMeal>);
+  /** Incrementado para forçar re-fetch das sugestões de IA em todos os cards */
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefreshPlan = useCallback(() => {
+    setIsRefreshing(true);
+    // Limpar cache de sugestões no localStorage
+    try {
+      Object.keys(localStorage)
+        .filter(k => k.startsWith('meal_sug_'))
+        .forEach(k => localStorage.removeItem(k));
+    } catch {}
+    setRefreshKey(k => k + 1);
+    // Animação de feedback por 1.5s
+    setTimeout(() => setIsRefreshing(false), 1500);
+  }, []);
 
 
   // Modal de seleção de template
@@ -624,19 +648,39 @@ export const MealPlanPanel: React.FC<MealPlanPanelProps> = ({
             <p className="text-xs text-gray-500 mt-0.5">Periodização inteligente e fracionamento</p>
           </div>
 
-          {profile.activityLevel !== 'sedentario' && (
+          <div className="flex items-center gap-2">
+            {/* Botão de atualizar sugestões */}
             <button
-              id="btn-toggle-training"
-              onClick={() => setHasTraining(t => !t)}
-              className={`text-xs px-3 py-1 rounded-full font-bold transition-all border ${
-                hasTraining
-                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-                  : 'bg-gray-900/30 text-gray-500 border-gray-800'
-              }`}
+              id="btn-refresh-meal-plan"
+              onClick={handleRefreshPlan}
+              disabled={isRefreshing}
+              title="Atualizar sugestões de refeições"
+              aria-label="Atualizar plano de refeições"
+              className="flex items-center justify-center w-7 h-7 rounded-full bg-gray-800/70 hover:bg-gray-700 border border-gray-700/40 hover:border-gray-600/60 text-gray-400 hover:text-gray-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {hasTraining ? '💪 Treino Hoje' : '🛋️ Descanso Hoje'}
+              <svg
+                className={`w-3.5 h-3.5 transition-transform duration-700 ${isRefreshing ? 'animate-spin' : 'hover:rotate-180'}`}
+                fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
             </button>
-          )}
+
+            {profile.activityLevel !== 'sedentario' && (
+              <button
+                id="btn-toggle-training"
+                onClick={() => setHasTraining(t => !t)}
+                className={`text-xs px-3 py-1 rounded-full font-bold transition-all border ${
+                  hasTraining
+                    ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                    : 'bg-gray-900/30 text-gray-500 border-gray-800'
+                }`}
+              >
+                {hasTraining ? '💪 Treino Hoje' : '🛋️ Descanso Hoje'}
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Banner de redistribuição */}
@@ -699,6 +743,7 @@ export const MealPlanPanel: React.FC<MealPlanPanelProps> = ({
               onSave={() => setSavingMealType(meal.type)}
               hasTemplates={savedTemplates.length > 0}
               userGoal={profile.goal}
+              refreshKey={refreshKey}
             />
           ))}
         </div>
