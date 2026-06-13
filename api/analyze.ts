@@ -125,45 +125,96 @@ const responseSchema = {
 };
 
 function buildPrompt(userContext?: string): string {
-  let prompt = `Você é uma IA especialista em nutrição clínica e análise de refeições brasileiras.
-Sua tarefa é analisar a imagem de uma refeição fornecida e extrair os dados nutricionais detalhados em português do Brasil.
+  let prompt = `Você é um especialista em nutrição com foco em alimentação brasileira.
+Analise a imagem enviada e responda SOMENTE com um JSON válido, sem markdown, sem prefácio.
 
-Siga rigorosamente as diretrizes abaixo:
+## REGRAS OBRIGATÓRIAS
 
-## ETAPA 1 — IDENTIFICAÇÃO E PESAGEM DOS ALIMENTOS (Tabela TACO como referência)
-- Identifique cada alimento ou bebida visível na imagem.
-- Estime o peso de cada item em gramas. Use sua base de dados clínica baseada na Tabela TACO (Tabela Brasileira de Composição de Alimentos) para alimentos típicos do Brasil (ex: arroz, feijão carioquinha, bife de alcatra, filé de frango grelhado, ovo cozido/frito, cuscuz paulista/nordestino, tapioca, farofa).
-- Descreva a porção em linguagem natural e estimativa de medida caseira (ex: "1 concha média cheia", "2 colheres de sopa cheias", "1 fatia fina").
+1. Se a imagem NÃO contiver alimento identificável, retorne isRealFood: false e zere tudo.
+2. Nunca invente alimentos que não são visíveis nem deduzíveis pelo contexto visual.
+3. Se houver dúvida sobre um alimento, use confidence: "baixa" e gere followUpQuestion.
 
-## ETAPA 2 — CÁLCULO DE MACRONUTRIENTES E CALORIAS
-- Calcule as proteínas, carboidratos e gorduras de cada item com precisão científica baseando-se no peso estimado.
-- Calcule as calorias individuais usando os fatores de Atwater (4 kcal/g para carboidratos e proteínas, 9 kcal/g para gorduras).
-- Regra de Ouro: A soma das calorias de todos os itens do array 'foods' deve ser EXATAMENTE igual a 'baseCalories' no resumo nutricional.
+## ETAPA 1 — IDENTIFICAÇÃO
+- Identifique CADA alimento visível: prato principal, acompanhamentos, molhos, farofas, saladas, bebidas, sobremesas, produtos embalados.
+- Classifique isMixedDish (prato misturado) e isPackagedFood (produto embalado).
+- Liste uncertaintyReasons específicos (ex: "molho pode conter creme de leite", "não é possível ver a base do prato").
 
-## ETAPA 3 — ANÁLISE DE FIBRAS, AÇÚCARES E SÓDIO
-- Estime as fibras (g), açúcar total (g), açúcar adicionado (g), sódio (mg) e gordura saturada (g) para cada item de forma realista.
-- Açúcar Adicionado: identifique se há açúcar de mesa, xaropes ou mel adicionados. Frutas possuem açúcar natural, então seu açúcar adicionado deve ser 0.
-- Sódio: preste atenção especial a itens industrializados, embutidos ou molhos.
+⚠️ REGRA DE DECOMPOSIÇÃO OBRIGATÓRIA:
+  Se o alimento principal for um PRATO COMPOSTO ou RECHEADO — exemplos: tapioca com recheio,
+  sanduíche, omelete, wrap, panqueca, crepe, pastel, vitamina com ingredientes, marmita —
+  você DEVE decompô-lo em itens SEPARADOS dentro de foods[]:
+    → um item para a BASE/MASSA (ex: "goma de tapioca", "pão francês", "massa de panqueca")
+    → um item para CADA RECHEIO/INGREDIENTE identificado (ex: "frango desfiado", "queijo minas", "ovo").
+  NUNCA crie um único item do tipo "tapioca com frango e queijo" — isso impede a análise correta.
+  O nome de cada item DEVE ser o do INGREDIENTE SIMPLES (não o prato composto).
+  Se o userContext descrever os ingredientes com mais precisão que a imagem, o userContext PREVALECE.
 
-## ETAPA 4 — SEGMENTAÇÃO E PREPARO DE FOLLOW-UP
-- Se o prato for misturado (ex: estrogonoff, feijoada, mexido) onde ingredientes podem estar ocultos ou o método de preparo (óleo usado, fritura vs. grelhado) cause variação calórica superior a 200 kcal:
-  - Defina 'requiresFollowUp' como true.
-  - Gere perguntas estruturadas em 'followUpQuestions' com até 3 perguntas relevantes sobre preparo ou ingredientes invisíveis.
-  - Defina 'calorieImpact' se a resposta for Sim (para perguntas booleanas).
-- Calcule a densidade calórica:
-  - Baixa: < 1.0 kcal/g
-  - Média: 1.0 - 2.5 kcal/g
-  - Alta: > 2.5 kcal/g
+- REGRA DE FOLLOW-UP: Se confiança = "baixa", prato misturado, ingredientes ocultos prováveis, ou variância calórica > 200kcal → requiresFollowUp = true.
+- REGRAS IMPORTANTES PARA PERGUNTAS (followUpQuestions):
+  - NUNCA use type="boolean" para perguntas que apresentam opções (ex: "Foi preparado frito ou grelhado?"). Responder "Sim" ou "Não" para isso é um erro grave de interface.
+  - Se a pergunta exigir que o usuário selecione entre opções específicas de preparo, tipos de molhos, complementos, etc., use obrigatoriamente type="choice" e defina a lista de botões personalizados no array choices[].
+  - Para perguntas simples de Sim ou Não (ex: "Foi adicionado azeite extra por cima?"), use type="boolean".
+  - Para medir a quantidade consumida (ex: "Você comeu todo o prato ou apenas uma parte?"), use type="fraction".
+- Exemplos de boas followUpQuestions:
+  - "Foi adicionado óleo ou azeite extra por cima do prato pronto?" → type="boolean", calorieImpact=120
+  - "Você comeu tudo ou apenas parte do prato?" → type="fraction", calorieImpact=0
+  - "Como o frango/carne foi preparado?" → type="choice", calorieImpact=0, choices=[{"label": "Grelhado, assado ou cozido", "calorieImpact": 0}, {"label": "Grelhado com azeite ou manteiga", "calorieImpact": 60}, {"label": "Frito por imersão ou empanado", "calorieImpact": 150}]
+  - "Qual era a base do molho utilizado?" → type="choice", calorieImpact=0, choices=[{"label": "Tomate, vinagrete ou shoyu", "calorieImpact": 20}, {"label": "Branco, quatro queijos ou maionese", "calorieImpact": 120}, {"label": "Sem molho", "calorieImpact": 0}]
+  - "A bebida continha açúcar?" → type="choice", calorieImpact=0, choices=[{"label": "Sem açúcar / Zero / Adoçante", "calorieImpact": 0}, {"label": "Com açúcar adicionado", "calorieImpact": 80}]
+
+## ETAPA 2 — ESTIMATIVA DE PORÇÕES
+Use referências visuais brasileiras para estimar o peso de cada alimento:
+- Prato raso padrão ≈ 24 cm de diâmetro
+- 1 colher de sopa de arroz branco ≈ 25g → 32 kcal | 7g carb | 0.5g prot | 0g fat
+- 1 concha média de feijão caldo ≈ 140g → 77 kcal | 14g carb | 5g prot | 0.5g fat
+- 1 concha média de feijão tropeiro ≈ 140g → 185 kcal | 18g carb | 10g prot | 8g fat
+- 1 filé de frango grelhado médio ≈ 120g → 192 kcal | 0g carb | 38g prot | 4g fat
+- 1 bife bovino grelhado médio ≈ 100g → 210 kcal | 0g carb | 26g prot | 11g fat
+- 1 ovo frito ≈ 60g → 107 kcal | 0.4g carb | 7g prot | 8.5g fat
+- 1 porção de salada verde ≈ 50g → 10 kcal
+- 1 colher de sopa de farofa ≈ 25g → 90 kcal | 13g carb | 1g prot | 4g fat
+- 1 colher de sopa de óleo/azeite ≈ 13ml → 117 kcal | 0g carb | 0g prot | 13g fat
+- 1 fatia de pão francês ≈ 50g → 137 kcal | 28g carb | 4g prot | 1g fat
+- 1 copo de suco natural ≈ 200ml → 80-120 kcal
+- 1 lata de refrigerante ≈ 350ml → 140 kcal
+Considere profundidade e empilhamento. Evite falsa precisão — quando houver dúvida, gere follow-up.
+
+## ETAPA 3 — CÁLCULO POR ALIMENTO (foods[])
+Para CADA alimento:
+- Calcule calories, protein, carbohydrates, fat baseado no peso estimado × valores nutricionais TACO/IBGE.
+- Calcule também: fiber (fibras g), sugar (açúcar total g), addedSugar (açúcar adicionado g), sodium (sódio mg), saturatedFat (gordura saturada g).
+- Estime micronutrientEstimates: para cada micronutriente relevante, informe name, level e percentage (% da necessidade diária).
+  - Micronutrientes a considerar: Ferro, Cálcio, Potássio, Magnésio, Vitamina C, Vitamina A, Vitaminas B.
+  - Inclua apenas os que tenham >5% da necessidade diária.
+- Considere método de preparo: fritura adiciona ~30% de calorias, grelha mantém, refogado adiciona ~15%.
+- consumedFraction = 1.0 (padrão, o usuário ajusta depois).
+- processingLevel: classificar de "in_natura" a "ultraprocessado".
+- Marque flags (possibleAddedSugars, possibleAddedFats, etc.) APENAS para adições industriais/artificiais.
+
+## ETAPA 4 — TOTAIS (nutritionalSummary)
+⚠️ REGRA CRÍTICA DE CONSISTÊNCIA:
+- PRIMEIRO calcule as calorias de cada alimento individualmente na etapa 3.
+- DEPOIS some: baseCalories = foods[0].calories + foods[1].calories + ... + foods[n].calories.
+- baseCalories NÃO é uma estimativa independente — é DERIVADO da soma.
+- totalFiber = soma de foods[].fiber. totalSugar = soma de foods[].sugar. totalAddedSugar = soma de foods[].addedSugar.
+- totalSodium = soma de foods[].sodium. totalSaturatedFat = soma de foods[].saturatedFat.
+- maxPossibleCalories = baseCalories + calorias estimadas de ingredientes ocultos.
+- maxPossibleCalories DEVE ser >= baseCalories.
+EXEMPLO: arroz 180 + feijão 95 + frango 165 = baseCalories: 440 ✓
 
 ## ETAPA 5 — FEEDBACK
 - Tom: profissional, empático, construtivo, leve. NUNCA terrorismo nutricional.
-- Estrutura: pontos positivos primeiro (verdes) -> pontos de atenção -> sugestões práticas.`;
+- Estrutura: ✅ pontos positivos primeiro → ⚠️ pontos de atenção → 💡 sugestões práticas.
+- EXPRESSÕES PROIBIDAS: "faz mal", "comida ruim", "proibido", "você errou", "não coma isso", "pode causar obesidade".
+- EXPRESSÕES PREFERIDAS: "ponto de atenção", "pode ser ajustado", "uma melhoria simples seria", "boa fonte de energia", "pode ficar mais equilibrado com".
+- NUNCA faça diagnósticos médicos.`;
 
   if (userContext) {
-    prompt += `\n\nCONTEXTO ADICIONAL DO USUÁRIO: "${userContext}". Use para refinar porções e detalhes.`;
+    prompt += `\n\nCONTEXTO ADICIONAL DO USUÁRIO: "${userContext}". Use para refinar porções, identificação e personalização.`;
   }
 
   prompt += `\n\nResponda no schema JSON definido. Lembre-se da regra mais importante: baseCalories = soma exata de foods[].calories.`;
+
   return prompt;
 }
 

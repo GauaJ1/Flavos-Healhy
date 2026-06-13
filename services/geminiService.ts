@@ -1,10 +1,31 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import type { AnalysisResult } from '../types';
-import { findTACOMatch } from '../utils/tacoDatabase';
+import { findTACOMatch, isCompositeDish } from '../utils/tacoDatabase';
 import { classifyFoodGroup } from '../hooks/useFoodDiversity';
 
 // O cliente do GoogleGenAI não é inicializado globalmente para evitar erros 
 // em produção quando a chave process.env.API_KEY estiver vazia.
+
+// ──────────────────────────────────────────────────────────────
+// Guard-rail constants for enforceConsistency
+// ──────────────────────────────────────────────────────────────
+
+/**
+ * Minimum trigram similarity for TACO enrichment to be applied.
+ * Below this threshold the IA-generated macros are kept as-is.
+ * Bug context: "tapioca com frango, ovo e queijo" was matched against
+ * "tapioca crua" (similarity ~0.55) and its macros REPLACED, causing
+ * the protein to collapse to ~3 g. Raising the bar to 0.82 prevents
+ * composite-dish names from accidentally matching simple ingredients.
+ */
+const MIN_TACO_SIMILARITY = 0.82;
+
+/**
+ * Maximum allowed relative deviation between the AI macro and the TACO
+ * macro before the enrichment is considered unreliable and discarded.
+ * Formula: |ai - taco| / max(ai, 1) > MAX_MACRO_DEVIATION → skip
+ */
+const MAX_MACRO_DEVIATION = 0.35;
 
 // ──────────────────────────────────────────────────────────────
 // Schema JSON — Referência canônica (alinhado com SKILL.md)
@@ -159,6 +180,17 @@ Analise a imagem enviada e responda SOMENTE com um JSON válido, sem markdown, s
 - Identifique CADA alimento visível: prato principal, acompanhamentos, molhos, farofas, saladas, bebidas, sobremesas, produtos embalados.
 - Classifique isMixedDish (prato misturado) e isPackagedFood (produto embalado).
 - Liste uncertaintyReasons específicos (ex: "molho pode conter creme de leite", "não é possível ver a base do prato").
+
+⚠️ REGRA DE DECOMPOSIÇÃO OBRIGATÓRIA:
+  Se o alimento principal for um PRATO COMPOSTO ou RECHEADO — exemplos: tapioca com recheio,
+  sanduíche, omelete, wrap, panqueca, crepe, pastel, vitamina com ingredientes, marmita —
+  você DEVE decompô-lo em itens SEPARADOS dentro de foods[]:
+    → um item para a BASE/MASSA (ex: "goma de tapioca", "pão francês", "massa de panqueca")
+    → um item para CADA RECHEIO/INGREDIENTE identificado (ex: "frango desfiado", "queijo minas", "ovo").
+  NUNCA crie um único item do tipo "tapioca com frango e queijo" — isso impede a análise correta.
+  O nome de cada item DEVE ser o do INGREDIENTE SIMPLES (não o prato composto).
+  Se o userContext descrever os ingredientes com mais precisão que a imagem, o userContext PREVALECE.
+
 - REGRA DE FOLLOW-UP: Se confiança = "baixa", prato misturado, ingredientes ocultos prováveis, ou variância calórica > 200kcal → requiresFollowUp = true.
 - REGRAS IMPORTANTES PARA PERGUNTAS (followUpQuestions):
   - NUNCA use type="boolean" para perguntas que apresentam opções (ex: "Foi preparado frito ou grelhado?"). Responder "Sim" ou "Não" para isso é um erro grave de interface.
@@ -228,7 +260,30 @@ EXEMPLO: arroz 180 + feijão 95 + frango 165 = baseCalories: 440 ✓
   return prompt;
 }
 
-function enforceConsistency(result: AnalysisResult): AnalysisResult {
+/**
+ * Checks whether the TACO macro deviation is within the acceptable threshold.
+ * Returns true when the TACO values are close enough to the AI values to be
+ * applied as an enrichment without distorting the analysis.
+ *
+ * @param aiProtein   Protein value from the AI analysis (g)
+ * @param tacoProtein Protein value from the TACO lookup (g per estimatedWeightGrams)
+ * @param aiCarbs     Carbohydrates value from the AI analysis (g)
+ * @param tacoCarbs   Carbohydrates from the TACO lookup (g per estimatedWeightGrams)
+ */
+function isTACODevAcceptable(
+  aiProtein: number,
+  tacoProtein: number,
+  aiCarbs: number,
+  tacoCarbs: number,
+): boolean {
+  const protDev = Math.abs(aiProtein - tacoProtein) / Math.max(aiProtein, 1);
+  const carbDev = Math.abs(aiCarbs - tacoCarbs) / Math.max(aiCarbs, 1);
+  // Both macros must be within MAX_MACRO_DEVIATION — if either diverges too much,
+  // the TACO match is probably a false positive and must be skipped.
+  return protDev <= MAX_MACRO_DEVIATION && carbDev <= MAX_MACRO_DEVIATION;
+}
+
+export function enforceConsistency(result: AnalysisResult): AnalysisResult {
   if (!result.foods || result.foods.length === 0) {
     return result;
   }
@@ -257,151 +312,182 @@ function enforceConsistency(result: AnalysisResult): AnalysisResult {
     // @ts-ignore
     food.foodGroup = food.foodGroup || classifyFoodGroup(food.name) || 'outro';
 
-    const matchInfo = findTACOMatch(food.name);
+    // ─── TACO ENRICHMENT GUARD-RAILS ──────────────────────────────────────────
+    // RULE 1 — Never override a composite dish name:
+    //   "tapioca com frango, ovo e queijo" must NOT be matched against
+    //   "tapioca" in the TACO table. By this point the AI should have already
+    //   decomposed the dish (via the prompt REGRA DE DECOMPOSIÇÃO), but this
+    //   guard is a safety net for any item that slipped through.
+    // RULE 2 — MIN_TACO_SIMILARITY threshold (0.82):
+    //   Only apply TACO data when the fuzzy match is very confident.
+    // RULE 3 — MAX_MACRO_DEVIATION (35%):
+    //   If the TACO protein or carb differs >35% from the AI value, skip.
+    //   This prevents wrong category matches (e.g., frango → farinha de frango).
+    // ──────────────────────────────────────────────────────────────────────────
+
+    const composite = isCompositeDish(food.name);
+    const matchInfo = composite
+      ? null // RULE 1: composite dishes are never TACO-overridden
+      : findTACOMatch(food.name, undefined, MIN_TACO_SIMILARITY); // RULE 2
+
+    let tacoApplied = false;
+
     if (matchInfo) {
       const match = matchInfo.match;
       const factor = food.estimatedWeightGrams / 100;
 
-      food.carbohydrates = Math.round(match.carbohydrates * factor * 10) / 10;
-      food.protein = Math.round(match.protein * factor * 10) / 10;
-      food.fat = Math.round(match.fat * factor * 10) / 10;
-      food.fiber = Math.round(match.fiber * factor * 10) / 10;
-      food.sugar = Math.round(match.sugar * factor * 10) / 10;
-      food.addedSugar = Math.round(match.addedSugar * factor * 10) / 10;
-      food.sodium = Math.round(match.sodium * factor);
-      food.saturatedFat = Math.round(match.saturatedFat * factor * 10) / 10;
+      const tacoProtein = Math.round(match.protein * factor * 10) / 10;
+      const tacoCarbs   = Math.round(match.carbohydrates * factor * 10) / 10;
 
-      // @ts-ignore
-      food.glycemicIndex = match.glycemicIndex;
-      // @ts-ignore
-      food.glycemicLoad = Math.round(((match.glycemicIndex * food.carbohydrates) / 100) * 10) / 10;
+      // RULE 3: Deviation guard
+      if (isTACODevAcceptable(food.protein || 0, tacoProtein, food.carbohydrates || 0, tacoCarbs)) {
+        // ✅ Safe to enrich — apply TACO secondary nutrients (fiber, sugar, sodium,
+        //    saturatedFat, micronutrients, glycemicIndex) while KEEPING calories
+        //    derived from the AI macros after applying TACO main macros.
+        food.carbohydrates = tacoCarbs;
+        food.protein       = tacoProtein;
+        food.fat           = Math.round(match.fat * factor * 10) / 10;
+        food.fiber         = Math.round(match.fiber * factor * 10) / 10;
+        food.sugar         = Math.round(match.sugar * factor * 10) / 10;
+        food.addedSugar    = Math.round(match.addedSugar * factor * 10) / 10;
+        food.sodium        = Math.round(match.sodium * factor);
+        food.saturatedFat  = Math.round(match.saturatedFat * factor * 10) / 10;
 
-      // @ts-ignore
-      food.fiberDetailed = {
-        total_g: food.fiber,
-        soluble_g: Math.round(food.fiber * 0.35 * 10) / 10,
-        insoluble_g: Math.round(food.fiber * 0.65 * 10) / 10,
-      };
+        // @ts-ignore
+        food.glycemicIndex = match.glycemicIndex;
+        // @ts-ignore
+        food.glycemicLoad = Math.round(((match.glycemicIndex * food.carbohydrates) / 100) * 10) / 10;
 
-      const micro = {
-        iron_mg: +(match.iron_mg * factor).toFixed(2),
-        calcium_mg: +(match.calcium_mg * factor).toFixed(1),
-        vitaminC_mg: +(match.vitaminC_mg * factor).toFixed(1),
-        vitaminD_mcg: +(match.vitaminD_mcg * factor).toFixed(3),
-        magnesium_mg: +(match.magnesium_mg * factor).toFixed(1),
-        potassium_mg: +(match.potassium_mg * factor).toFixed(1),
-        zinc_mg: +(match.zinc_mg * factor).toFixed(2),
-        vitaminB12_mcg: +(match.vitaminB12_mcg * factor).toFixed(2),
-      };
-      // @ts-ignore
-      food.micronutrientsDetailed = micro;
+        // @ts-ignore
+        food.fiberDetailed = {
+          total_g: food.fiber,
+          soluble_g: Math.round(food.fiber * 0.35 * 10) / 10,
+          insoluble_g: Math.round(food.fiber * 0.65 * 10) / 10,
+        };
 
-      const estimates: any[] = [];
-      Object.entries(micro).forEach(([key, val]) => {
-        const idrVal = IDR_BRASIL[key];
-        if (idrVal) {
-          const pct = Math.round((val / idrVal) * 100);
-          if (pct >= 5) {
-            const nameMap: Record<string, string> = {
-              iron_mg: 'Ferro',
-              calcium_mg: 'Cálcio',
-              vitaminC_mg: 'Vitamina C',
-              vitaminD_mcg: 'Vitamina D',
-              magnesium_mg: 'Magnésio',
-              potassium_mg: 'Potássio',
-              zinc_mg: 'Zinco',
-              vitaminB12_mcg: 'Vitamina B12',
-            };
-            const level = pct >= 30 ? 'alto' : pct >= 15 ? 'bom' : pct >= 5 ? 'moderado' : 'baixo';
-            estimates.push({ name: nameMap[key] || key, level, percentage: pct });
+        const micro = {
+          iron_mg:       +(match.iron_mg * factor).toFixed(2),
+          calcium_mg:    +(match.calcium_mg * factor).toFixed(1),
+          vitaminC_mg:   +(match.vitaminC_mg * factor).toFixed(1),
+          vitaminD_mcg:  +(match.vitaminD_mcg * factor).toFixed(3),
+          magnesium_mg:  +(match.magnesium_mg * factor).toFixed(1),
+          potassium_mg:  +(match.potassium_mg * factor).toFixed(1),
+          zinc_mg:       +(match.zinc_mg * factor).toFixed(2),
+          vitaminB12_mcg:+(match.vitaminB12_mcg * factor).toFixed(2),
+        };
+        // @ts-ignore
+        food.micronutrientsDetailed = micro;
+
+        const estimates: any[] = [];
+        Object.entries(micro).forEach(([key, val]) => {
+          const idrVal = IDR_BRASIL[key];
+          if (idrVal) {
+            const pct = Math.round((val / idrVal) * 100);
+            if (pct >= 5) {
+              const nameMap: Record<string, string> = {
+                iron_mg:       'Ferro',
+                calcium_mg:    'Cálcio',
+                vitaminC_mg:   'Vitamina C',
+                vitaminD_mcg:  'Vitamina D',
+                magnesium_mg:  'Magnésio',
+                potassium_mg:  'Potássio',
+                zinc_mg:       'Zinco',
+                vitaminB12_mcg:'Vitamina B12',
+              };
+              const level = pct >= 30 ? 'alto' : pct >= 15 ? 'bom' : pct >= 5 ? 'moderado' : 'baixo';
+              estimates.push({ name: nameMap[key] || key, level, percentage: pct });
+            }
           }
-        }
-      });
-      food.micronutrientEstimates = estimates.sort((a, b) => b.percentage - a.percentage);
+        });
+        food.micronutrientEstimates = estimates.sort((a, b) => b.percentage - a.percentage);
 
-      // @ts-ignore
-      totalAntiInflammatory += match.antiInflammatoryScore;
-      antiInflammatoryCount++;
+        // @ts-ignore
+        totalAntiInflammatory += match.antiInflammatoryScore;
+        antiInflammatoryCount++;
 
-      totalMicroValues.iron_mg += micro.iron_mg;
-      totalMicroValues.calcium_mg += micro.calcium_mg;
-      totalMicroValues.vitaminC_mg += micro.vitaminC_mg;
-      totalMicroValues.vitaminD_mcg += micro.vitaminD_mcg;
-      totalMicroValues.magnesium_mg += micro.magnesium_mg;
-      totalMicroValues.potassium_mg += micro.potassium_mg;
-      totalMicroValues.zinc_mg += micro.zinc_mg;
-      totalMicroValues.vitaminB12_mcg += micro.vitaminB12_mcg;
-    } else {
-      food.fiber = food.fiber || 0;
-      food.sugar = food.sugar || 0;
-      food.addedSugar = food.addedSugar || 0;
-      food.sodium = food.sodium || 0;
-      food.saturatedFat = food.saturatedFat || 0;
+        totalMicroValues.iron_mg        += micro.iron_mg;
+        totalMicroValues.calcium_mg     += micro.calcium_mg;
+        totalMicroValues.vitaminC_mg    += micro.vitaminC_mg;
+        totalMicroValues.vitaminD_mcg   += micro.vitaminD_mcg;
+        totalMicroValues.magnesium_mg   += micro.magnesium_mg;
+        totalMicroValues.potassium_mg   += micro.potassium_mg;
+        totalMicroValues.zinc_mg        += micro.zinc_mg;
+        totalMicroValues.vitaminB12_mcg += micro.vitaminB12_mcg;
+
+        tacoApplied = true;
+      } else {
+        // Deviation too large — log and fall through to the "AI-only" path
+        console.warn(
+          `[enforceConsistency] TACO deviation too large for "${food.name}" ` +
+          `(sim=${matchInfo.similarity.toFixed(2)}, matched="${match.name}"). ` +
+          'Keeping AI macros.',
+        );
+      }
+    }
+
+    if (!tacoApplied) {
+      // ── AI-only path: normalise secondary nutrients, keep AI macros ──────────
+      food.fiber        = food.fiber        ?? 0;
+      food.sugar        = food.sugar        ?? 0;
+      food.addedSugar   = food.addedSugar   ?? 0;
+      food.sodium       = food.sodium       ?? 0;
+      food.saturatedFat = food.saturatedFat ?? 0;
 
       // @ts-ignore
       food.glycemicIndex = food.glycemicIndex || (food.possibleAddedSugars ? 70 : 45);
       // @ts-ignore
-      food.glycemicLoad = Math.round(((food.glycemicIndex * food.carbohydrates) / 100) * 10) / 10;
+      food.glycemicLoad = Math.round(((food.glycemicIndex * (food.carbohydrates || 0)) / 100) * 10) / 10;
 
       // @ts-ignore
       food.fiberDetailed = {
-        total_g: food.fiber,
-        soluble_g: Math.round(food.fiber * 0.35 * 10) / 10,
+        total_g:     food.fiber,
+        soluble_g:   Math.round(food.fiber * 0.35 * 10) / 10,
         insoluble_g: Math.round(food.fiber * 0.65 * 10) / 10,
       };
 
       const micro = {
-        iron_mg: 0,
-        calcium_mg: 0,
-        vitaminC_mg: 0,
-        vitaminD_mcg: 0,
-        magnesium_mg: 0,
-        potassium_mg: 0,
-        zinc_mg: 0,
-        vitaminB12_mcg: 0,
+        iron_mg: 0, calcium_mg: 0, vitaminC_mg: 0, vitaminD_mcg: 0,
+        magnesium_mg: 0, potassium_mg: 0, zinc_mg: 0, vitaminB12_mcg: 0,
       };
 
       if (food.micronutrientEstimates) {
         food.micronutrientEstimates.forEach(est => {
-          const nameClean = est.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-          if (nameClean.includes('ferro')) micro.iron_mg = +(est.percentage / 100 * IDR_BRASIL.iron_mg).toFixed(2);
-          if (nameClean.includes('calcio')) micro.calcium_mg = +(est.percentage / 100 * IDR_BRASIL.calcium_mg).toFixed(1);
-          if (nameClean.includes('vitamina c')) micro.vitaminC_mg = +(est.percentage / 100 * IDR_BRASIL.vitaminC_mg).toFixed(1);
-          if (nameClean.includes('vitamina d')) micro.vitaminD_mcg = +(est.percentage / 100 * IDR_BRASIL.vitaminD_mcg).toFixed(3);
-          if (nameClean.includes('magnesio')) micro.magnesium_mg = +(est.percentage / 100 * IDR_BRASIL.magnesium_mg).toFixed(1);
-          if (nameClean.includes('potassio')) micro.potassium_mg = +(est.percentage / 100 * IDR_BRASIL.potassium_mg).toFixed(1);
-          if (nameClean.includes('zinco')) micro.zinc_mg = +(est.percentage / 100 * IDR_BRASIL.zinc_mg).toFixed(2);
-          if (nameClean.includes('vitamina b12')) micro.vitaminB12_mcg = +(est.percentage / 100 * IDR_BRASIL.vitaminB12_mcg).toFixed(2);
+          const n = est.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+          if (n.includes('ferro'))       micro.iron_mg        = +(est.percentage / 100 * IDR_BRASIL.iron_mg).toFixed(2);
+          if (n.includes('calcio'))      micro.calcium_mg     = +(est.percentage / 100 * IDR_BRASIL.calcium_mg).toFixed(1);
+          if (n.includes('vitamina c'))  micro.vitaminC_mg    = +(est.percentage / 100 * IDR_BRASIL.vitaminC_mg).toFixed(1);
+          if (n.includes('vitamina d'))  micro.vitaminD_mcg   = +(est.percentage / 100 * IDR_BRASIL.vitaminD_mcg).toFixed(3);
+          if (n.includes('magnesio'))    micro.magnesium_mg   = +(est.percentage / 100 * IDR_BRASIL.magnesium_mg).toFixed(1);
+          if (n.includes('potassio'))    micro.potassium_mg   = +(est.percentage / 100 * IDR_BRASIL.potassium_mg).toFixed(1);
+          if (n.includes('zinco'))       micro.zinc_mg        = +(est.percentage / 100 * IDR_BRASIL.zinc_mg).toFixed(2);
+          if (n.includes('vitamina b12'))micro.vitaminB12_mcg = +(est.percentage / 100 * IDR_BRASIL.vitaminB12_mcg).toFixed(2);
         });
       }
       // @ts-ignore
       food.micronutrientsDetailed = micro;
 
-      totalMicroValues.iron_mg += micro.iron_mg;
-      totalMicroValues.calcium_mg += micro.calcium_mg;
-      totalMicroValues.vitaminC_mg += micro.vitaminC_mg;
-      totalMicroValues.vitaminD_mcg += micro.vitaminD_mcg;
-      totalMicroValues.magnesium_mg += micro.magnesium_mg;
-      totalMicroValues.potassium_mg += micro.potassium_mg;
-      totalMicroValues.zinc_mg += micro.zinc_mg;
+      totalMicroValues.iron_mg        += micro.iron_mg;
+      totalMicroValues.calcium_mg     += micro.calcium_mg;
+      totalMicroValues.vitaminC_mg    += micro.vitaminC_mg;
+      totalMicroValues.vitaminD_mcg   += micro.vitaminD_mcg;
+      totalMicroValues.magnesium_mg   += micro.magnesium_mg;
+      totalMicroValues.potassium_mg   += micro.potassium_mg;
+      totalMicroValues.zinc_mg        += micro.zinc_mg;
       totalMicroValues.vitaminB12_mcg += micro.vitaminB12_mcg;
-      
-      totalAntiInflammatory += food.processingLevel === 'ultraprocessado' ? 2 : food.processingLevel === 'processado' ? 4 : 6;
+
+      totalAntiInflammatory += food.processingLevel === 'ultraprocessado' ? 2
+        : food.processingLevel === 'processado' ? 4 : 6;
       antiInflammatoryCount++;
     }
 
-    if (food.fiber === undefined || food.fiber === null) food.fiber = 0;
-    if (food.sugar === undefined || food.sugar === null) food.sugar = 0;
-    if (food.addedSugar === undefined || food.addedSugar === null) food.addedSugar = 0;
-    if (food.sodium === undefined || food.sodium === null) food.sodium = 0;
-    if (food.saturatedFat === undefined || food.saturatedFat === null) food.saturatedFat = 0;
-
+    // ── Always recalculate calories from macros (do NOT trust baseCalories) ──
     const carbCal = (food.carbohydrates || 0) * 4;
-    const protCal = (food.protein || 0) * 4;
-    const fatCal = (food.fat || 0) * 9;
+    const protCal = (food.protein       || 0) * 4;
+    const fatCal  = (food.fat           || 0) * 9;
     food.calories = Math.round(carbCal + protCal + fatCal);
   });
 
+  // ── Recalculate summary from foods[] (never from AI's baseCalories) ─────────
   const calculatedCalories = result.foods.reduce((sum, food) => sum + (food.calories || 0), 0);
   result.nutritionalSummary.baseCalories = calculatedCalories;
 
@@ -413,7 +499,7 @@ function enforceConsistency(result: AnalysisResult): AnalysisResult {
   result.nutritionalSummary.totalFiber = finalFiber;
   // @ts-ignore
   result.nutritionalSummary.fiberTotal_g = finalFiber;
-  
+
   result.nutritionalSummary.totalSugar = Math.round(
     result.foods.reduce((s, f) => s + (f.sugar || 0), 0) * 10
   ) / 10;
@@ -428,11 +514,9 @@ function enforceConsistency(result: AnalysisResult): AnalysisResult {
   ) / 10;
 
   // Fase 1: Calcular score anti-inflamatório médio
-  if (antiInflammatoryCount > 0) {
-    result.nutritionalSummary.antiInflammatoryScore = Math.round((totalAntiInflammatory / antiInflammatoryCount) * 10) / 10;
-  } else {
-    result.nutritionalSummary.antiInflammatoryScore = 5.0;
-  }
+  result.nutritionalSummary.antiInflammatoryScore = antiInflammatoryCount > 0
+    ? Math.round((totalAntiInflammatory / antiInflammatoryCount) * 10) / 10
+    : 5.0;
 
   // Fase 1: Calcular percentuais de cobertura diária (% da IDR ANVISA)
   totalMicroValues.fiber_g = finalFiber;

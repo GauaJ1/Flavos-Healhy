@@ -353,11 +353,44 @@ export function trigramSimilarity(str1: string, str2: string): number {
   return intersection / union;
 }
 
-export function findTACOMatch(foodName: string): { match: TacoNutrient; similarity: number } | null {
+/**
+ * Composite-dish keyword guard.
+ * Returns true when the food name describes an assembled/filled dish whose
+ * macro profile CANNOT be mapped 1-to-1 to a single TACO ingredient.
+ */
+export function isCompositeDish(foodName: string): boolean {
+  const COMPOSITE_KEYWORDS = [
+    'tapioca com', 'sanduiche', 'omelete', 'wrap', 'panqueca', 'crepe',
+    'pastel', 'recheado', 'recheada', 'misto', 'mista', 'vitamina de',
+    'vitamina com', 'prato feito', 'marmita', 'strogonoff', 'yakisoba',
+    'lasanha', 'pizza', 'hamburguer', 'lanche', 'x-burguer', 'x burguer',
+  ];
+  const clean = foodName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return COMPOSITE_KEYWORDS.some(kw => clean.includes(kw));
+}
+
+/**
+ * Fuzzy match a food name against the TACO database.
+ *
+ * @param foodName          The food item name to look up.
+ * @param allowedFoodGroups Optional whitelist of TACO foodGroup values.
+ *                          When provided, candidates not in this list are
+ *                          skipped, preventing category cross-matches like
+ *                          "frango" → "farinha de frango".
+ * @param minSimilarity     Minimum trigram similarity (default 0.42).
+ */
+export function findTACOMatch(
+  foodName: string,
+  allowedFoodGroups?: string[],
+  minSimilarity = 0.42,
+): { match: TacoNutrient; similarity: number } | null {
   let bestMatch: TacoNutrient | null = null;
   let maxSimilarity = 0;
 
   for (const item of TACO_DATABASE) {
+    if (allowedFoodGroups && allowedFoodGroups.length > 0) {
+      if (!allowedFoodGroups.includes(item.foodGroup)) continue;
+    }
     const sim = trigramSimilarity(foodName, item.name);
     if (sim > maxSimilarity) {
       maxSimilarity = sim;
@@ -365,7 +398,7 @@ export function findTACOMatch(foodName: string): { match: TacoNutrient; similari
     }
   }
 
-  if (bestMatch && maxSimilarity >= 0.4) {
+  if (bestMatch && maxSimilarity >= minSimilarity) {
     return { match: bestMatch, similarity: maxSimilarity };
   }
 
