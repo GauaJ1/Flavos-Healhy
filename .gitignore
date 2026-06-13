@@ -47,3 +47,4 @@ release.properties
 .agents/
 
 # migrations/ é intencionalmente versionada — schema SQL sem segredos
+.vercel
