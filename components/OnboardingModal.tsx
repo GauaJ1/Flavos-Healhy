@@ -42,11 +42,22 @@ const OnboardingModal: React.FC<Props> = ({ onComplete, onSkip }) => {
   const [weightKg, setWeightKg] = useState(70);
   const [activityLevel, setActivityLevel] = useState<ActivityLevel>('moderado');
   const [goal, setGoal] = useState<Goal>('manter');
+  const [bodyFatPct, setBodyFatPct] = useState<number | undefined>(undefined);
+  const [enableBodyFat, setEnableBodyFat] = useState(false);
 
   const stepIndex = STEPS.indexOf(step);
   const progress = (stepIndex / (STEPS.length - 1)) * 100;
 
-  const profile: UserProfile = { name, birthYear, sex, heightCm, weightKg, activityLevel, goal };
+  const profile: UserProfile = {
+    name,
+    birthYear,
+    sex,
+    heightCm,
+    weightKg,
+    activityLevel,
+    goal,
+    bodyFatPct: enableBodyFat ? bodyFatPct : undefined,
+  };
   const targets = calcTargets(profile);
 
   const handleComplete = () => {
@@ -200,9 +211,42 @@ const OnboardingModal: React.FC<Props> = ({ onComplete, onSkip }) => {
                       <span className="w-16 text-right text-white font-bold text-lg">{weightKg} kg</span>
                     </div>
                   </div>
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-xs text-gray-400 font-medium block">Gordura Corporal (%BF)</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEnableBodyFat(!enableBodyFat);
+                          if (!enableBodyFat && bodyFatPct === undefined) {
+                            setBodyFatPct(15);
+                          }
+                        }}
+                        className={`text-[10px] px-2 py-0.5 rounded font-semibold transition-all border ${
+                          enableBodyFat
+                            ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                            : 'bg-gray-800 text-gray-400 border-gray-700'
+                        }`}
+                      >
+                        {enableBodyFat ? 'Usar Cunningham' : 'Opcional (BF)'}
+                      </button>
+                    </div>
+                    {enableBodyFat && (
+                      <div className="flex items-center gap-3 mt-1.5">
+                        <input
+                          type="range" min={3} max={50} value={bodyFatPct ?? 15}
+                          onChange={e => setBodyFatPct(Number(e.target.value))}
+                          className="flex-1 accent-emerald-500"
+                        />
+                        <span className="w-16 text-right text-white font-bold text-lg">{bodyFatPct ?? 15}%</span>
+                      </div>
+                    )}
+                  </div>
                   <div className="bg-gray-800/60 rounded-xl p-3 border border-gray-700/50">
-                    <p className="text-xs text-gray-500 mb-1">Prévia da sua taxa metabólica basal (TMB)</p>
-                    <p className="text-emerald-400 font-bold text-xl">{calcTargets({ name, birthYear, sex, heightCm, weightKg, activityLevel, goal }).tmbKcal} kcal/dia</p>
+                    <p className="text-xs text-gray-500 mb-1">
+                      Prévia da sua taxa metabólica basal (TMB) · {targets.isCunningham ? 'Cunningham' : 'Mifflin'}
+                    </p>
+                    <p className="text-emerald-400 font-bold text-xl">{targets.tmbKcal} kcal/dia</p>
                     <p className="text-xs text-gray-600">Calorias mínimas para funções vitais em repouso</p>
                   </div>
                 </div>
@@ -281,7 +325,9 @@ const OnboardingModal: React.FC<Props> = ({ onComplete, onSkip }) => {
                   <h3 className="text-xl font-bold text-white mb-1">
                     {name ? `Suas metas, ${name}!` : 'Suas metas personalizadas!'}
                   </h3>
-                  <p className="text-gray-500 text-sm">Calculado via fórmula Mifflin-St Jeor.</p>
+                  <p className="text-gray-500 text-sm">
+                    Calculado via {targets.isCunningham ? 'fórmula de Cunningham' : 'fórmula Mifflin-St Jeor'}.
+                  </p>
                 </div>
 
                 <div className="bg-emerald-600/10 border border-emerald-500/30 rounded-2xl p-5">

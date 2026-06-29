@@ -1,0 +1,254 @@
+
+<h2 class="sr-only">Mockup do TDEE adaptativo integrado ao ciclo de carboidratos: mostra calibração automática do gasto real via peso e calorias, e como o ciclo usa esse valor corrigido</h2>
+
+<style>
+.screen{background:var(--surface-1);border-radius:12px;padding:14px}
+.card{background:var(--surface-2);border:0.5px solid var(--border);border-radius:12px;padding:1rem 1.25rem;margin-bottom:10px}
+.tabs{display:flex;gap:6px;margin-bottom:12px}
+.tb{padding:7px 14px;border-radius:99px;font-size:13px;cursor:pointer;border:0.5px solid var(--border);background:transparent;color:var(--text-secondary);white-space:nowrap}
+.tb.on{border-color:#1D9E75;color:#1D9E75;background:#E1F5EE}
+@media(prefers-color-scheme:dark){.tb.on{border-color:#9FE1CB;color:#9FE1CB;background:#085041}}
+.row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.h3{font-size:15px;font-weight:500;color:var(--text-primary);margin:0 0 4px}
+.sub{font-size:13px;color:var(--text-secondary);margin:0 0 12px}
+.conf-row{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.conf-dots{display:flex;gap:3px}
+.dot{width:8px;height:8px;border-radius:50%}
+.dot-on{background:#1D9E75}
+.dot-off{background:var(--border-strong)}
+.conf-lbl{font-size:12px;color:var(--text-secondary)}
+.compare-box{background:var(--surface-1);border-radius:var(--radius);padding:10px 12px;margin-bottom:8px}
+.cmp-row{display:flex;align-items:center;justify-content:space-between;padding:5px 0;border-bottom:0.5px solid var(--border)}
+.cmp-row:last-of-type{border-bottom:none}
+.cmp-lbl{font-size:13px;color:var(--text-secondary)}
+.cmp-val{font-size:14px;font-weight:500;color:var(--text-primary)}
+.cmp-val.pos{color:#1D9E75}
+.cmp-val.old{color:var(--text-muted);text-decoration:line-through;font-weight:400}
+.target-card{background:var(--bg-success);border:0.5px solid var(--border-success);border-radius:var(--radius);padding:10px 12px;margin-bottom:8px}
+.target-card .lbl{font-size:12px;color:var(--text-success);margin:0 0 2px}
+.target-card .big{font-size:22px;font-weight:500;color:var(--text-success)}
+.target-card .small{font-size:12px;color:var(--text-success);margin-top:2px}
+.tip{display:flex;gap:8px;align-items:flex-start;padding:10px 12px;border-radius:var(--radius);background:var(--bg-accent);font-size:13px;color:var(--text-accent);line-height:1.5}
+.tip i{flex-shrink:0;font-size:16px;margin-top:1px}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:10px}
+.stat{background:var(--surface-1);border-radius:var(--radius);padding:10px;text-align:center}
+.sv{font-size:19px;font-weight:500;color:var(--text-primary)}
+.sl{font-size:11px;color:var(--text-muted);margin-top:2px}
+.week-bar{display:flex;gap:3px;margin:10px 0 4px}
+.wc{flex:1;border-radius:6px;padding:6px 2px;text-align:center;cursor:pointer;transition:opacity .15s}
+.wc .wd{font-size:10px;font-weight:500}
+.wc .wk{font-size:10px;margin-top:2px}
+.wc-h{background:#E1F5EE;color:#0F6E56}
+.wc-m{background:#FAEEDA;color:#854F0B}
+.wc-l{background:#EEEDFE;color:#534AB7}
+.wc.sel{opacity:1;outline:2px solid currentColor}
+.wc:not(.sel){opacity:0.6}
+@media(prefers-color-scheme:dark){
+  .wc-h{background:#085041;color:#9FE1CB}
+  .wc-m{background:#412402;color:#FAC775}
+  .wc-l{background:#26215C;color:#AFA9EC}
+}
+.day-detail{background:var(--surface-1);border-radius:var(--radius);padding:10px 12px;margin-top:8px}
+.dd-act{font-size:12px;color:var(--text-muted);margin-bottom:6px}
+.dd-kcal{font-size:22px;font-weight:500;color:var(--text-primary);margin-bottom:10px}
+.pb-row{display:flex;align-items:center;gap:8px;margin-bottom:5px}
+.pb-lbl{font-size:12px;color:var(--text-secondary);width:68px;flex-shrink:0}
+.pb-track{flex:1;height:5px;background:var(--border-strong);border-radius:99px;overflow:hidden}
+.pb-fill{height:100%;border-radius:99px}
+.pb-val{font-size:12px;color:var(--text-primary);width:40px;text-align:right;flex-shrink:0}
+.badge-new{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 8px;border-radius:99px;background:#E1F5EE;color:#0F6E56}
+@media(prefers-color-scheme:dark){.badge-new{background:#085041;color:#9FE1CB}}
+.ewma-row{display:flex;align-items:center;gap:6px;margin-bottom:10px}
+.ewma-dot{width:8px;height:8px;border-radius:50%;background:#1D9E75;flex-shrink:0}
+.ewma-lbl{font-size:12px;color:var(--text-secondary)}
+.warning-card{background:var(--bg-warning);border:0.5px solid var(--border-warning);border-radius:var(--radius);padding:10px 12px;margin-bottom:8px;display:flex;gap:8px;align-items:flex-start}
+.warning-card i{font-size:16px;color:var(--text-warning);flex-shrink:0;margin-top:1px}
+.warning-card span{font-size:13px;color:var(--text-warning);line-height:1.5}
+</style>
+
+<div class="screen">
+
+<div class="tabs" id="tabs">
+  <button class="tb on" onclick="switchTab('tdee')">TDEE adaptativo</button>
+  <button class="tb" onclick="switchTab('cycle')">Ciclo integrado</button>
+</div>
+
+<div id="pane-tdee">
+
+  <div class="card">
+    <div class="row" style="margin-bottom:8px">
+      <p class="h3">Calibração automática</p>
+      <span class="badge-new"><i class="ti ti-sparkles" aria-hidden="true" style="font-size:12px"></i>18 dias</span>
+    </div>
+    <p class="sub">Estimando seu gasto real via peso + calorias registradas</p>
+
+    <div class="conf-row">
+      <div class="conf-dots">
+        <div class="dot dot-on"></div>
+        <div class="dot dot-on"></div>
+        <div class="dot dot-on"></div>
+        <div class="dot dot-on"></div>
+        <div class="dot dot-on"></div>
+      </div>
+      <span class="conf-lbl">Confiança alta — 18 de 14 dias mínimos</span>
+    </div>
+
+    <div class="ewma-row">
+      <div class="ewma-dot"></div>
+      <span class="ewma-lbl">Média EWMA de peso: 61,4 kg (suavizado) → estável nos últimos 18 dias</span>
+    </div>
+
+    <div class="compare-box">
+      <div class="cmp-row">
+        <span class="cmp-lbl">Mifflin-St Jeor (fórmula)</span>
+        <span class="cmp-val old">2.836 kcal</span>
+      </div>
+      <div class="cmp-row">
+        <span class="cmp-lbl">TDEE real estimado</span>
+        <span class="cmp-val pos">3.135 kcal</span>
+      </div>
+      <div class="cmp-row">
+        <span class="cmp-lbl">Diferença detectada</span>
+        <span class="cmp-val pos">+299 kcal</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <p class="h3" style="margin-bottom:8px">Sua meta atualizada</p>
+
+    <div class="warning-card">
+      <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+      <span>Você estava consumindo 3.136 kcal e o peso não mudou em 18 dias — seu TDEE real é maior que o calculado.</span>
+    </div>
+
+    <div class="target-card">
+      <p class="lbl">Nova meta diária (ganhar massa)</p>
+      <p class="big">3.435 kcal</p>
+      <p class="small">TDEE real 3.135 + surplus +300 kcal</p>
+    </div>
+
+    <div class="grid2">
+      <div class="stat">
+        <div class="sv">112g</div>
+        <div class="sl">Proteína · inalterada</div>
+      </div>
+      <div class="stat">
+        <div class="sv" style="color:#1D9E75">+299</div>
+        <div class="sl">kcal corrigidas</div>
+      </div>
+    </div>
+
+    <div class="tip">
+      <i class="ti ti-bulb" aria-hidden="true"></i>
+      <span>Atualização automática semanal — quanto mais dias registrados, mais precisa fica a estimativa.</span>
+    </div>
+  </div>
+
+</div>
+
+<div id="pane-cycle" style="display:none">
+
+  <div class="card">
+    <div class="row" style="margin-bottom:6px">
+      <p class="h3">Ciclo com TDEE real</p>
+      <span class="badge-new">3.435 kcal base</span>
+    </div>
+    <p class="sub">Distribuição baseada no seu gasto real estimado</p>
+
+    <div class="week-bar" id="wbar"></div>
+    <div style="font-size:11px;color:var(--text-muted);text-align:center;margin-bottom:4px" id="wtotal"></div>
+  </div>
+
+  <div class="card" id="day-card">
+    <div id="day-detail-inner"></div>
+  </div>
+
+  <div class="card">
+    <p class="h3" style="margin-bottom:10px">Comparativo: antes vs agora</p>
+    <div class="compare-box">
+      <div class="cmp-row">
+        <span class="cmp-lbl">Dia alto · antes</span>
+        <span class="cmp-val old">3.453 kcal</span>
+      </div>
+      <div class="cmp-row">
+        <span class="cmp-lbl">Dia alto · agora</span>
+        <span class="cmp-val pos">3.735 kcal</span>
+      </div>
+      <div class="cmp-row">
+        <span class="cmp-lbl">Dia baixo · antes</span>
+        <span class="cmp-val old">2.553 kcal</span>
+      </div>
+      <div class="cmp-row">
+        <span class="cmp-lbl">Dia baixo · agora</span>
+        <span class="cmp-val pos">2.835 kcal</span>
+      </div>
+    </div>
+    <div class="tip">
+      <i class="ti ti-trending-up" aria-hidden="true"></i>
+      <span>Com TDEE real, o dia alto finalmente gera surplus real. O dia baixo passa de pequeno surplus (falso) para leve déficit intencional.</span>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<script>
+const TDEE_REAL=3135,GOAL_DELTA=300,TARGET=TDEE_REAL+GOAL_DELTA
+const HIGH=TARGET+300,MOD=TARGET,LOW=TARGET-600
+const DAYS=['Seg','Ter','Qua','Qui','Sex','Sáb','Dom']
+const TYPES=['high','mod','high','low','high','high','low']
+const ACTS=['Academia pesada','Corrida 5km','Academia pesada','Descanso','Academia pesada','Corrida + academia','Caminhada leve']
+const W=62,PROT=112
+
+let selDay=0
+
+function calcDay(type){
+  const kcal=type==='high'?HIGH:type==='mod'?MOD:LOW
+  const carbs=type==='high'?Math.round(W*8):type==='mod'?Math.round(W*6):Math.round(W*2.5)
+  const fat=Math.max(Math.round((kcal-PROT*4-carbs*4)/9),Math.round(W*0.8))
+  return{kcal,carbs,protein:PROT,fat,type}
+}
+
+function renderCycle(){
+  const days=TYPES.map(calcDay)
+  const total=days.reduce((a,d)=>a+d.kcal,0)
+  const avg=Math.round(total/7)
+
+  const bar=document.getElementById('wbar')
+  bar.innerHTML=''
+  days.forEach((d,i)=>{
+    const cl='wc wc-'+(d.type==='high'?'h':d.type==='mod'?'m':'l')+(i===selDay?' sel':'')
+    const el=document.createElement('div')
+    el.className=cl
+    el.innerHTML=`<div class="wd">${DAYS[i]}</div><div class="wk">${d.kcal.toLocaleString('pt-BR')}</div>`
+    el.onclick=()=>{selDay=i;renderCycle()}
+    bar.appendChild(el)
+  })
+
+  document.getElementById('wtotal').textContent=`Total: ${total.toLocaleString('pt-BR')} kcal · Média: ${avg.toLocaleString('pt-BR')} kcal/dia`
+
+  const d=days[selDay]
+  const pPct=Math.round(d.protein*4/d.kcal*100)
+  const cPct=Math.round(d.carbs*4/d.kcal*100)
+  const fPct=Math.round(d.fat*9/d.kcal*100)
+  const typeLabel=d.type==='high'?'Dia alto — treino pesado':d.type==='mod'?'Dia moderado':'Dia baixo — descanso'
+  document.getElementById('day-detail-inner').innerHTML=`
+    <div class="dd-act">${DAYS[selDay]} · ${ACTS[selDay]} · ${typeLabel}</div>
+    <div class="dd-kcal">${d.kcal.toLocaleString('pt-BR')} kcal</div>
+    <div class="pb-row"><span class="pb-lbl">Carboidrato</span><div class="pb-track"><div class="pb-fill" style="width:${cPct}%;background:#1D9E75"></div></div><span class="pb-val">${d.carbs}g</span></div>
+    <div class="pb-row"><span class="pb-lbl">Proteína</span><div class="pb-track"><div class="pb-fill" style="width:${pPct}%;background:#7F77DD"></div></div><span class="pb-val">${d.protein}g</span></div>
+    <div class="pb-row"><span class="pb-lbl">Gordura</span><div class="pb-track"><div class="pb-fill" style="width:${fPct}%;background:#EF9F27"></div></div><span class="pb-val">${d.fat}g</span></div>
+  `
+}
+
+function switchTab(t){
+  document.querySelectorAll('.tb').forEach(b=>b.classList.remove('on'))
+  document.getElementById('pane-tdee').style.display=t==='tdee'?'block':'none'
+  document.getElementById('pane-cycle').style.display=t==='cycle'?'block':'none'
+  event.target.classList.add('on')
+  if(t==='cycle')renderCycle()
+}
+
+renderCycle()
+</script>

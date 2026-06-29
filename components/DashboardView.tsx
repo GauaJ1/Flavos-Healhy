@@ -11,7 +11,7 @@
  * - Arco-íris de diversidade alimentar + janela alimentar (Fase 3)
  * - Deep Link Samsung Health (Android)
  */
-import React, { useCallback } from 'react';
+import React, { useCallback, useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import type { HistoryEntry } from '../types';
 import { useDailyStats, loadGoals } from '../hooks/useDailyStats';
@@ -20,8 +20,10 @@ import { useWeight } from '../hooks/useWeight';
 import { useStreaks } from '../hooks/useStreaks';
 import { useAchievements } from '../hooks/useAchievements';
 import { useFoodDiversity } from '../hooks/useFoodDiversity';
-import { useUserProfile } from '../hooks/useUserProfile';
+import { useUserProfile, calcTargets } from '../hooks/useUserProfile';
 import { useWeeklyReports } from '../hooks/useWeeklyReports';
+import { useAdaptiveTDEE } from '../hooks/useAdaptiveTDEE';
+import { useCarbCycle } from '../hooks/useCarbCycle';
 import CalorieRing from './CalorieRing';
 import MacroCards from './MacroCards';
 import HydrationTracker from './HydrationTracker';
@@ -32,6 +34,10 @@ import DiversityPanel from './DiversityPanel';
 import { MealPlanPanel } from './MealPlanPanel';
 import WeeklyReportCard from './WeeklyReportCard';
 import WellbeingPanel from './WellbeingPanel';
+import { AdaptiveTDEECard } from './AdaptiveTDEECard';
+import { CarbCycleCard } from './CarbCycleCard';
+import type { DailyGoals } from '../hooks/useDailyStats';
+import type { NutritionalTargets } from '../hooks/useUserProfile';
 
 interface DashboardViewProps {
   history: HistoryEntry[];
@@ -56,6 +62,82 @@ const DashboardView: React.FC<DashboardViewProps> = ({
   const { weeklyDiversity, eatingWindow } = useFoodDiversity(history);
   const { profile, targets } = useUserProfile();
   const { latestReport, generateReportManually, isGenerating, error } = useWeeklyReports(history);
+
+  // Sub-abas de configuração
+  const [activeSubTab, setActiveSubTab] = useState<'tdee' | 'cycle'>('tdee');
+
+  // Hook do TDEE adaptativo
+  const {
+    state: tdeeState,
+    effectiveTDEE,
+    effectiveTarget,
+    acceptOverride,
+    rejectOverride,
+  } = useAdaptiveTDEE(
+    weight.entries,
+    history,
+    targets?.tdeeKcal ?? goals.calories,
+    profile?.goal ?? 'manter'
+  );
+
+  // Hook do Ciclo de carboidratos
+  const {
+    weekSummary,
+    selectedDay,
+    setSelectedDay,
+    todayMacros,
+    updateDayType,
+  } = useCarbCycle(effectiveTarget, profile);
+
+  // Targets com TDEE adaptativo aplicado
+  const currentTargets = useMemo<NutritionalTargets | null>(() => {
+    if (!profile) return null;
+    return calcTargets(profile, effectiveTarget);
+  }, [profile, effectiveTarget]);
+
+  // Metas de calorias e macros para HOJE (para alimentar os anéis e cards no topo)
+  const todayGoals = useMemo<DailyGoals>(() => {
+    if (profile) {
+      if (activeSubTab === 'cycle' && todayMacros) {
+        return {
+          calories: todayMacros.kcal,
+          protein: todayMacros.protein,
+          carbohydrates: todayMacros.carbs,
+          fat: todayMacros.fat,
+          water: goals.water,
+        };
+      }
+      if (currentTargets) {
+        return {
+          calories: currentTargets.targetKcal,
+          protein: currentTargets.targetProtein_g,
+          carbohydrates: currentTargets.targetCarbs_g,
+          fat: currentTargets.targetFat_g,
+          water: goals.water,
+        };
+      }
+    }
+    return goals;
+  }, [profile, activeSubTab, todayMacros, currentTargets, goals]);
+
+  // Nutritional targets a serem repassadas para o MealPlanPanel (Plano de Refeições)
+  const activeTargets = useMemo<NutritionalTargets | null>(() => {
+    if (!profile) return null;
+
+    if (activeSubTab === 'cycle' && todayMacros) {
+      return {
+        tmbKcal: targets?.tmbKcal ?? 0,
+        tdeeKcal: effectiveTDEE,
+        targetKcal: todayMacros.kcal,
+        targetProtein_g: todayMacros.protein,
+        targetCarbs_g: todayMacros.carbs,
+        targetFat_g: todayMacros.fat,
+        isCunningham: targets?.isCunningham,
+      };
+    }
+
+    return currentTargets;
+  }, [profile, activeSubTab, todayMacros, currentTargets, targets, effectiveTDEE]);
 
   const waterGoalMet = hydration.percentage >= 100;
   const achievements = useAchievements(history, {
@@ -134,26 +216,81 @@ const DashboardView: React.FC<DashboardViewProps> = ({
       {/* Streak */}
       <StreakBadge consistencyStreak={consistencyStreak} calorieGoalStreak={calorieGoalStreak} />
 
-      {/* Calorie ring */}
-      <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-5 flex flex-col items-center gap-2">
-        <div className="flex justify-between items-center w-full mb-1">
-          <p className="text-xs text-gray-500">Calorias do dia</p>
-          {hasProfile && (
-            <p className="text-xs text-emerald-400/70">meta personalizada</p>
-          )}
+      {/* Switcher de Sub-abas */}
+      {hasProfile && (
+        <div className="flex gap-2 p-1 bg-gray-900/50 border border-gray-800 rounded-2xl">
+          <button
+            onClick={() => setActiveSubTab('tdee')}
+            className={`flex-1 py-2 text-xs font-semibold rounded-xl transition-all ${
+              activeSubTab === 'tdee'
+                ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/20 font-bold'
+                : 'text-gray-400 hover:text-gray-300 font-medium'
+            }`}
+          >
+            TDEE Adaptativo
+          </button>
+          <button
+            onClick={() => setActiveSubTab('cycle')}
+            className={`flex-1 py-2 text-xs font-semibold rounded-xl transition-all ${
+              activeSubTab === 'cycle'
+                ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/20 font-bold'
+                : 'text-gray-400 hover:text-gray-300 font-medium'
+            }`}
+          >
+            Ciclo de Carboidratos
+          </button>
         </div>
-        <CalorieRing
-          consumed={macros.calories}
-          goal={goals.calories}
-          meals={macros.meals}
-        />
-      </div>
+      )}
 
-      {/* Macros */}
-      <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-4">
-        <p className="text-xs text-gray-500 mb-3">Macronutrientes</p>
-        <MacroCards macros={macros} goals={goals} />
-      </div>
+      {/* Exibição condicional da aba de TDEE Adaptativo ou Ciclo de Carboidratos */}
+      {activeSubTab === 'tdee' ? (
+        <>
+          {/* Calorie ring */}
+          <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-5 flex flex-col items-center gap-2">
+            <div className="flex justify-between items-center w-full mb-1">
+              <p className="text-xs text-gray-500">Calorias do dia</p>
+              {hasProfile && (
+                <p className="text-xs text-emerald-400/70">
+                  {tdeeState.overrideAccepted ? 'meta adaptativa real' : 'meta personalizada'}
+                </p>
+              )}
+            </div>
+            <CalorieRing
+              consumed={macros.calories}
+              goal={todayGoals.calories}
+              meals={macros.meals}
+            />
+          </div>
+
+          {/* Macros */}
+          <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-4">
+            <p className="text-xs text-gray-500 mb-3">Macronutrientes</p>
+            <MacroCards macros={macros} goals={todayGoals} />
+          </div>
+
+          {/* Card do TDEE Adaptativo */}
+          {hasProfile && (
+            <AdaptiveTDEECard
+              state={tdeeState}
+              onAccept={acceptOverride}
+              onReject={rejectOverride}
+            />
+          )}
+        </>
+      ) : (
+        <>
+          {/* Card do Ciclo de Carboidratos */}
+          {profile && weekSummary && (
+            <CarbCycleCard
+              summary={weekSummary}
+              selectedDay={selectedDay}
+              onSelectDay={setSelectedDay}
+              onUpdateDayType={updateDayType}
+              baseCalories={effectiveTarget}
+            />
+          )}
+        </>
+      )}
 
       {/* Hydration */}
       <HydrationTracker
@@ -174,8 +311,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({
       />
 
       {/* Plano de Refeições (Fase 2) */}
-      {profile && targets && (
-        <MealPlanPanel profile={profile} targets={targets} />
+      {profile && activeTargets && (
+        <MealPlanPanel profile={profile} targets={activeTargets} />
       )}
 
       {/* Diversidade alimentar + janela (Fase 3) */}

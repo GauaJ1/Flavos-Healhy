@@ -21,6 +21,7 @@ export interface UserProfile {
   weightKg: number;
   activityLevel: ActivityLevel;
   goal: Goal;
+  bodyFatPct?: number; // Opcional para equação de Cunningham
 }
 
 export interface NutritionalTargets {
@@ -30,6 +31,7 @@ export interface NutritionalTargets {
   targetProtein_g: number;
   targetCarbs_g: number;
   targetFat_g: number;
+  isCunningham?: boolean;
 }
 
 const PROFILE_KEY = 'flavos_user_profile';
@@ -66,15 +68,28 @@ const CARBS_GKG: Record<ActivityLevel, { min: number; ideal: number; max: number
 
 const FAT_FLOOR_GKG = 0.8;
 
-export function calcTargets(profile: UserProfile): NutritionalTargets {
-  const age = new Date().getFullYear() - profile.birthYear;
-  const base = 10 * profile.weightKg + 6.25 * profile.heightCm - 5 * age;
-  const tmb = profile.sex === 'M' ? base + 5 : base - 161;
+export function calcTargets(profile: UserProfile, overrideTargetKcal?: number): NutritionalTargets {
+  let tmb = 0;
+  let isCunningham = false;
+
+  if (profile.bodyFatPct !== undefined && profile.bodyFatPct > 0) {
+    // Equação de Cunningham: TMB = 370 + 21.6 * LBM (Lean Body Mass)
+    const lbm = profile.weightKg * (1 - profile.bodyFatPct / 100);
+    tmb = 370 + 21.6 * lbm;
+    isCunningham = true;
+  } else {
+    // Fórmula Mifflin-St Jeor
+    const age = new Date().getFullYear() - profile.birthYear;
+    const base = 10 * profile.weightKg + 6.25 * profile.heightCm - 5 * age;
+    tmb = profile.sex === 'M' ? base + 5 : base - 161;
+  }
+
   const tdee = Math.round(tmb * ACTIVITY_FACTOR[profile.activityLevel]);
-  const targetKcal = Math.max(1200, tdee + GOAL_DELTA[profile.goal]);
+  const targetKcal = overrideTargetKcal !== undefined
+    ? Math.max(1200, overrideTargetKcal)
+    : Math.max(1200, tdee + GOAL_DELTA[profile.goal]);
 
   // Bônus de proteína por objetivo (ISSN: preservar massa magra em déficit)
-  // perder_peso: +0.2 g/kg | manter: 0 | ganhar_massa: 0
   const PROTEIN_GOAL_BONUS: Record<Goal, number> = {
     perder_peso:  0.2,
     manter:       0.0,
@@ -103,6 +118,7 @@ export function calcTargets(profile: UserProfile): NutritionalTargets {
     targetProtein_g: proteinG,
     targetCarbs_g: Math.max(carbsG, 0),
     targetFat_g: fatG,
+    isCunningham,
   };
 }
 
