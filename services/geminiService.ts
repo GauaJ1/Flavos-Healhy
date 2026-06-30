@@ -844,3 +844,130 @@ Formato de resposta esperado: ["Sugestão 1...", "Sugestão 2..."]`;
 
   return suggestions;
 };
+
+// ──────────────────────────────────────────────────────────────
+// Sugestão de Ciclo de Carboidratos baseada em atividades da semana
+// ──────────────────────────────────────────────────────────────
+
+export interface CarbCycleSuggestion {
+  dayIndex: number; // 0 = Segunda, 6 = Domingo
+  type: 'high' | 'mod' | 'low';
+  reasoning: string; // Explicação curta (1 frase) em português
+}
+
+/**
+ * Usa o Gemini para classificar as descrições de atividade da semana
+ * em dias de carboidrato Alto, Moderado ou Baixo, retornando também
+ * um raciocínio curto para cada dia.
+ *
+ * @param days       Array com dayIndex (0–6) e a descrição do treino/atividade
+ * @param userGoal   Objetivo do usuário: 'perder', 'manter' ou 'ganhar'
+ * @param tdeeKcal   TDEE estimado (kcal/dia) para contextualizar a resposta
+ */
+export const suggestCarbCycleFromActivities = async (
+  days: { dayIndex: number; activity: string }[],
+  userGoal: string,
+  tdeeKcal: number
+): Promise<CarbCycleSuggestion[]> => {
+
+  const DAY_NAMES = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
+
+  const daysText = days
+    .map(d => `- ${DAY_NAMES[d.dayIndex]}: ${d.activity || 'sem descrição'}`)
+    .join('\n');
+
+  const goalMap: Record<string, string> = {
+    perder: 'perda de gordura (déficit calórico)',
+    manter: 'manutenção de peso',
+    ganhar: 'ganho de massa muscular (superávit calórico)',
+  };
+  const goalLabel = goalMap[userGoal] || 'manutenção de peso';
+
+  const prompt = `Você é um nutricionista esportivo especialista em periodização de carboidratos (carb cycling).
+
+O usuário tem objetivo de ${goalLabel} e TDEE estimado de ${tdeeKcal} kcal/dia.
+
+Abaixo estão as atividades planejadas para cada dia da semana:
+${daysText}
+
+## Regras para classificação:
+
+**ALTO (high)** — dia de treino intenso (musculação pesada, HIIT, treino de força com séries compostas, corrida longa >45 min, esportes de alta intensidade). Requer reposição glicogênica máxima.
+
+**MODERADO (mod)** — dia de treino de intensidade média (musculação leve/isolada, caminhada rápida, treino funcional leve, yoga ativa, ciclismo moderado). Requer reposição parcial.
+
+**BAIXO (low)** — dia de descanso, descanso ativo (caminhada tranquila, alongamento, meditação), ou atividade de baixíssima intensidade. Sem necessidade de reposição significativa.
+
+## Instruções adicionais:
+- Se a atividade for vaga ou ambígua (ex: "academia", "treino"), classifique como mod e explique no reasoning.
+- Se não houver descrição, classifique como low.
+- Para objetivo de ganho de massa: prefira high ou mod mesmo em dias de descanso se o usuário treina muito.
+- Para objetivo de perda: prefira low em dias de descanso, mod em treinos médios.
+- O reasoning deve ser 1 frase curta, direta e em português (máx. 10 palavras).
+
+Retorne APENAS um JSON válido no formato:
+{
+  "days": [
+    { "dayIndex": 0, "type": "high", "reasoning": "Treino pesado exige reposição máxima de glicogênio" },
+    ...
+  ]
+}`;
+
+  const apiKey = process.env.API_KEY;
+
+  const parseSuggestions = (raw: string): CarbCycleSuggestion[] => {
+    const parsed = JSON.parse(raw);
+    const arr = parsed.days ?? parsed;
+    if (!Array.isArray(arr)) throw new Error('Formato inválido');
+    return arr.map((item: any) => ({
+      dayIndex: Number(item.dayIndex),
+      type: ['high', 'mod', 'low'].includes(item.type) ? item.type : 'mod',
+      reasoning: String(item.reasoning || ''),
+    }));
+  };
+
+  if (apiKey) {
+    try {
+      const localAi = new GoogleGenAI({ apiKey });
+      const response = await localAi.models.generateContent({
+        model: 'gemini-3.1-flash-lite',
+        contents: [{ text: prompt }],
+        config: {
+          responseMimeType: 'application/json',
+        },
+      });
+      const jsonText = response.text?.trim();
+      if (!jsonText) throw new Error('Resposta vazia da IA');
+      return parseSuggestions(jsonText);
+    } catch (error) {
+      console.error('[CarbCycleSuggest] Falha na análise local:', error);
+      throw new Error('Falha ao gerar sugestão de ciclo localmente.');
+    }
+  } else {
+    const isLocalWebDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const hasCapacitor = window.hasOwnProperty('Capacitor') || window.location.protocol.startsWith('capacitor');
+    const proxyUrl = (isLocalWebDev && !hasCapacitor)
+      ? '/api/analyze'
+      : 'https://healthy.flavoscompany.xyz/api/analyze';
+
+    try {
+      const response = await fetch(proxyUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ textPrompt: prompt }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Erro HTTP no proxy: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const rawText = typeof data === 'string' ? data : (data.text || data.result || JSON.stringify(data));
+      return parseSuggestions(rawText);
+    } catch (error) {
+      console.error('[CarbCycleSuggest] Falha no proxy:', error);
+      throw new Error('Falha ao gerar sugestão de ciclo via servidor.');
+    }
+  }
+};
+

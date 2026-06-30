@@ -98,23 +98,7 @@ const App: React.FC = () => {
     }
   }, [weeklyReminder]);
 
-  // Listener para Clique em Notificação (Deep Link)
-  useEffect(() => {
-    if (!Capacitor.isNativePlatform()) return;
-
-    const handle = LocalNotifications.addListener(
-      'localNotificationActionPerformed',
-      (action) => {
-        if (action.notification.extra?.deepLink === 'carbCycle:update') {
-          goToTab('dashboard');
-          setView('carbCycleReminder');
-        }
-      }
-    );
-    return () => {
-      handle.remove();
-    };
-  }, [goToTab]);
+  // (deep link listener movido para após a declaração de goToTab)
 
   // Escutar evento de relatório semanal
   useEffect(() => {
@@ -168,6 +152,27 @@ const App: React.FC = () => {
     else if (tab === 'history') setView('history');
     setError(null);
   }, []);
+
+  // Listener para Clique em Notificação (Deep Link) — após declaração de goToTab
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    let cleanup: (() => void) | undefined;
+    LocalNotifications.addListener(
+      'localNotificationActionPerformed',
+      (action) => {
+        if (action.notification.extra?.deepLink === 'carbCycle:update') {
+          goToTab('dashboard');
+          setView('carbCycleReminder');
+        }
+      }
+    ).then((handle) => {
+      cleanup = () => handle.remove();
+    });
+    return () => {
+      cleanup?.();
+    };
+  }, [goToTab]);
 
   // ── Handlers ─────────────────────────────────────────────────────────────────
   const handleAnalysisStart = useCallback(async (imageFile: File, userDescription: string) => {
@@ -338,6 +343,8 @@ const App: React.FC = () => {
                   setToastMessage(msg);
                   setTimeout(() => setToastMessage(null), 4000);
                 }}
+                userGoal={profile.goal ?? 'manter'}
+                tdeeKcal={effectiveTarget}
               />
             )}
           </motion.div>

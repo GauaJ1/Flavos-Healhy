@@ -12,7 +12,6 @@ import { calcTargets, saveUserProfile, carbLoadStrategy } from '../hooks/useUser
 import { saveGoals } from '../hooks/useDailyStats';
 import { useWeeklyCycleReminder } from '../hooks/useWeeklyCycleReminder';
 import { Capacitor } from '@capacitor/core';
-import { App as CapacitorApp } from '@capacitor/app';
 
 interface Props {
   onComplete: (profile: UserProfile) => void;
@@ -342,7 +341,7 @@ const OnboardingModal: React.FC<Props> = ({ onComplete, onSkip }) => {
                         <p>Notificações bloqueadas nas configurações do celular. Habilite para receber os lembretes.</p>
                         <button
                           type="button"
-                          onClick={() => CapacitorApp.openSettings()}
+                          onClick={() => { window.open('app-settings:'); }}
                           className="bg-red-500/20 text-red-400 font-bold px-2 py-1 rounded-md self-start border border-red-500/30"
                         >
                           Abrir Configurações
