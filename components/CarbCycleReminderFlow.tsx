@@ -1,18 +1,19 @@
 /**
  * CarbCycleReminderFlow — Fluxo de atualização rápida da rotina semanal de treinos.
  *
- * Exibe um formulário simplificado para revisar os 7 dias da semana (Seg-Dom),
+ * Exibe um formulário para revisar os 7 dias da semana (Seg-Dom),
  * ajustar as descrições dos treinos e as intensidades calóricas do ciclo.
  *
- * v2: Integração com Gemini — botão "✨ Sugerir com IA" classifica automaticamente
- *     cada dia (Alto/Mod/Baixo) com base na descrição de atividade.
+ * v3: Entrada Global com IA (Interpretador Inteligente) — o usuário descreve a semana inteira
+ *     em texto livre (ex: "segunda pernas, terça corrida, quarta descanso...") e o Gemini
+ *     interpreta o texto para preencher tanto os treinos quanto os níveis de carboidratos de todos os dias.
  */
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { CycleDay, CycleDayConfig } from '../hooks/useCarbCycle';
 import {
-  suggestCarbCycleFromActivities,
-  type CarbCycleSuggestion,
+  interpretWeeklyRoutineWithAI,
+  type AIWeeklyCycleDay,
 } from '../services/geminiService';
 
 interface CarbCycleReminderFlowProps {
@@ -47,7 +48,9 @@ export const CarbCycleReminderFlow: React.FC<CarbCycleReminderFlowProps> = ({
     }))
   );
 
-  // Estado da sugestão da IA
+  // Estado para entrada de texto livre da IA
+  const [isAiBoxOpen, setIsAiBoxOpen] = useState(true);
+  const [rawRoutineText, setRawRoutineText] = useState('');
   const [isLoadingAI, setIsLoadingAI] = useState(false);
   const [aiReasonings, setAiReasonings] = useState<Record<number, string>>({});
   const [aiApplied, setAiApplied] = useState(false);
@@ -56,7 +59,7 @@ export const CarbCycleReminderFlow: React.FC<CarbCycleReminderFlowProps> = ({
     setFormDays(prev =>
       prev.map((d, i) => (i === index ? { ...d, activity: val } : d))
     );
-    // Limpa o reasoning da IA se o usuário editar manualmente
+    // Limpa o reasoning da IA se o usuário editar manualmente a atividade
     if (aiReasonings[index] !== undefined) {
       setAiReasonings(prev => {
         const next = { ...prev };
@@ -79,34 +82,44 @@ export const CarbCycleReminderFlow: React.FC<CarbCycleReminderFlowProps> = ({
     onClose();
   };
 
-  /** Chama o Gemini para sugerir tipos de dia com base nas atividades */
-  const handleAISuggest = async () => {
+  /** Chama a IA para estruturar toda a semana a partir da descrição global */
+  const handleAIInterpret = async () => {
+    if (!rawRoutineText.trim()) {
+      showToast('Digite a rotina da sua semana para a IA analisar.');
+      return;
+    }
+
     setIsLoadingAI(true);
     setAiApplied(false);
     try {
-      const suggestions: CarbCycleSuggestion[] = await suggestCarbCycleFromActivities(
-        formDays.map(d => ({ dayIndex: d.dayIndex, activity: d.activity })),
+      const results: AIWeeklyCycleDay[] = await interpretWeeklyRoutineWithAI(
+        rawRoutineText,
         userGoal,
         tdeeKcal
       );
 
-      // Aplica os tipos sugeridos e guarda os reasonings
       const newReasonings: Record<number, string> = {};
       setFormDays(prev =>
         prev.map((day, i) => {
-          const suggestion = suggestions.find(s => s.dayIndex === day.dayIndex);
-          if (suggestion) {
-            newReasonings[i] = suggestion.reasoning;
-            return { ...day, type: suggestion.type };
+          const matched = results.find(r => r.dayIndex === day.dayIndex);
+          if (matched) {
+            newReasonings[i] = matched.reasoning;
+            return {
+              ...day,
+              activity: matched.activity,
+              type: matched.type,
+            };
           }
           return day;
         })
       );
+
       setAiReasonings(newReasonings);
       setAiApplied(true);
-      showToast('✨ IA classificou sua semana! Revise e ajuste se necessário.');
+      setIsAiBoxOpen(false); // Fecha o box para focar no resultado
+      showToast('✨ A IA preencheu sua semana inteira! Veja os resultados abaixo.');
     } catch (err) {
-      showToast('Não foi possível gerar a sugestão. Tente novamente.');
+      showToast('Não foi possível interpretar a rotina. Tente novamente.');
     } finally {
       setIsLoadingAI(false);
     }
@@ -130,7 +143,7 @@ export const CarbCycleReminderFlow: React.FC<CarbCycleReminderFlowProps> = ({
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-extrabold text-white tracking-tight">Como vai ser sua semana?</h2>
-          <p className="text-xs text-gray-400 mt-1">Descreva cada dia — a IA monta o ciclo ideal pra você</p>
+          <p className="text-xs text-gray-400 mt-1">Defina sua rotina de treinos para calibrar o ciclo</p>
         </div>
         <button
           onClick={onClose}
@@ -141,51 +154,83 @@ export const CarbCycleReminderFlow: React.FC<CarbCycleReminderFlowProps> = ({
         </button>
       </div>
 
-      {/* Ações Rápidas */}
+      {/* Card da IA - Entrada Global em Texto Livre */}
+      <div className="bg-gradient-to-r from-violet-950/20 to-fuchsia-950/20 border border-violet-500/20 rounded-2xl p-4 flex flex-col gap-3">
+        <div
+          className="flex items-center justify-between cursor-pointer select-none"
+          onClick={() => setIsAiBoxOpen(prev => !prev)}
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-base">✨</span>
+            <span className="text-xs font-bold text-violet-300">Planejar Semana Completa com IA</span>
+          </div>
+          <span className="text-xs text-violet-400 font-bold hover:text-violet-300">
+            {isAiBoxOpen ? 'Recolher' : 'Escrever Rotina'}
+          </span>
+        </div>
+
+        <AnimatePresence initial={true}>
+          {isAiBoxOpen && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="overflow-hidden flex flex-col gap-3"
+            >
+              <p className="text-[11px] text-gray-400 leading-normal">
+                Escreva livremente seus planos (ex: "segunda perna pesada, terça descanso, quarta peito, quinta funcional, sexta descanso, sabado corrida e domingo off"):
+              </p>
+              <textarea
+                value={rawRoutineText}
+                onChange={e => setRawRoutineText(e.target.value)}
+                placeholder="Ex: Treino pernas seg, quarta e sexta. Terça e quinta corro 8km na rua. Sábado e domingo descanso total..."
+                rows={3}
+                className="w-full bg-gray-900 border border-violet-500/10 focus:border-violet-500/30 rounded-xl px-3 py-2 text-xs text-white placeholder-gray-600 focus:outline-none transition-colors resize-none"
+              />
+              <button
+                onClick={handleAIInterpret}
+                disabled={isLoadingAI}
+                className="w-full bg-violet-600 hover:bg-violet-500 disabled:bg-violet-800/40 text-white font-extrabold py-2.5 rounded-xl text-xs transition-all active:scale-98 flex items-center justify-center gap-1.5 shadow-lg shadow-violet-950/30"
+              >
+                {isLoadingAI ? (
+                  <>
+                    <svg className="animate-spin w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Processando com IA...
+                  </>
+                ) : (
+                  <>✨ Estruturar com IA</>
+                )}
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Ações Rápidas Extras */}
       <div className="flex gap-2">
         <button
           onClick={handleRepeatPrevious}
           className="flex-1 bg-gray-850 hover:bg-gray-800 text-gray-200 border border-gray-750 font-bold py-2.5 px-3 rounded-xl text-xs transition-all active:scale-98 flex items-center justify-center gap-1.5"
         >
-          🔄 Repetir anterior
-        </button>
-
-        {/* Botão de sugestão da IA */}
-        <button
-          onClick={handleAISuggest}
-          disabled={isLoadingAI}
-          className={`flex-1 font-extrabold py-2.5 px-3 rounded-xl text-xs transition-all active:scale-98 flex items-center justify-center gap-1.5 border
-            ${isLoadingAI
-              ? 'bg-violet-900/30 border-violet-700/30 text-violet-400 cursor-wait'
-              : 'bg-gradient-to-r from-violet-600/20 to-fuchsia-600/20 border-violet-500/30 text-violet-300 hover:from-violet-600/30 hover:to-fuchsia-600/30'
-            }`}
-        >
-          {isLoadingAI ? (
-            <>
-              <svg className="animate-spin w-3.5 h-3.5 text-violet-400" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              Analisando...
-            </>
-          ) : (
-            <>✨ Sugerir com IA</>
-          )}
+          🔄 Repetir semana anterior
         </button>
       </div>
 
-      {/* Badge de confirmação da IA */}
+      {/* Banner de feedback da IA */}
       <AnimatePresence>
         {aiApplied && (
           <motion.div
             initial={{ opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
-            className="flex items-center gap-2 bg-violet-900/20 border border-violet-500/20 rounded-xl px-3 py-2"
+            className="flex items-center gap-2 bg-emerald-950/20 border border-emerald-500/25 rounded-xl px-3 py-2"
           >
-            <span className="text-violet-400 text-lg">✨</span>
-            <p className="text-xs text-violet-300">
-              Ciclo sugerido com base nas suas atividades. Ajuste à vontade antes de salvar.
+            <span className="text-emerald-400 text-base">✓</span>
+            <p className="text-[11px] text-emerald-300">
+              Rotina estruturada! Revise os dias abaixo e faça ajustes se desejar.
             </p>
           </motion.div>
         )}
@@ -250,7 +295,7 @@ export const CarbCycleReminderFlow: React.FC<CarbCycleReminderFlowProps> = ({
                 />
               </div>
 
-              {/* Reasoning da IA (aparece após sugestão) */}
+              {/* Reasoning da IA */}
               <AnimatePresence>
                 {hasReasoning && (
                   <motion.div
@@ -259,9 +304,9 @@ export const CarbCycleReminderFlow: React.FC<CarbCycleReminderFlowProps> = ({
                     exit={{ opacity: 0, height: 0 }}
                     className="overflow-hidden"
                   >
-                    <div className={`flex items-start gap-1.5 mt-0.5 px-2.5 py-1.5 rounded-lg bg-gray-900/60 border border-gray-800/60`}>
+                    <div className="flex items-start gap-1.5 mt-0.5 px-2.5 py-1.5 rounded-lg bg-gray-900/60 border border-gray-800/60">
                       <span className="text-[10px] shrink-0 mt-0.5">✨</span>
-                      <p className={`text-[10px] leading-tight ${labelColor} opacity-80`}>
+                      <p className={`text-[10px] leading-tight ${labelColor} opacity-85 font-medium`}>
                         {aiReasonings[i]}
                       </p>
                     </div>
@@ -277,7 +322,7 @@ export const CarbCycleReminderFlow: React.FC<CarbCycleReminderFlowProps> = ({
       <div className="flex gap-3 mt-2">
         <button
           onClick={onClose}
-          className="flex-1 bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium py-3.5 rounded-2xl text-xs transition-all active:scale-95"
+          className="flex-1 bg-gray-850 hover:bg-gray-800 text-gray-300 font-medium py-3.5 rounded-2xl text-xs transition-all active:scale-95 border border-gray-750"
         >
           Cancelar
         </button>
@@ -285,7 +330,7 @@ export const CarbCycleReminderFlow: React.FC<CarbCycleReminderFlowProps> = ({
           onClick={handleSave}
           className="flex-1 bg-gradient-to-r from-emerald-600 to-teal-500 hover:opacity-95 text-white font-extrabold py-3.5 rounded-2xl text-xs transition-all shadow-lg shadow-emerald-950/20 active:scale-95"
         >
-          Atualizar Ciclo 🚀
+          Confirmar e Salvar 🚀
         </button>
       </div>
     </motion.div>

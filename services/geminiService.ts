@@ -849,33 +849,27 @@ Formato de resposta esperado: ["Sugestão 1...", "Sugestão 2..."]`;
 // Sugestão de Ciclo de Carboidratos baseada em atividades da semana
 // ──────────────────────────────────────────────────────────────
 
-export interface CarbCycleSuggestion {
+export interface AIWeeklyCycleDay {
   dayIndex: number; // 0 = Segunda, 6 = Domingo
+  activity: string; // Nome da atividade extraída (ex: "Musculação (Peito/Tríceps)", "Corrida 5km", "Descanso")
   type: 'high' | 'mod' | 'low';
-  reasoning: string; // Explicação curta (1 frase) em português
+  reasoning: string; // Explicação resumida (até 10 palavras)
 }
 
 /**
- * Usa o Gemini para classificar as descrições de atividade da semana
- * em dias de carboidrato Alto, Moderado ou Baixo, retornando também
- * um raciocínio curto para cada dia.
+ * Usa o Gemini para interpretar uma descrição em texto livre de toda a semana do usuário,
+ * identificando as atividades corretas de Segunda a Domingo e definindo
+ * o nível do ciclo de carboidratos (high/mod/low) para cada dia.
  *
- * @param days       Array com dayIndex (0–6) e a descrição do treino/atividade
+ * @param rawText    O texto livre digitado pelo usuário descrevendo a semana
  * @param userGoal   Objetivo do usuário: 'perder', 'manter' ou 'ganhar'
- * @param tdeeKcal   TDEE estimado (kcal/dia) para contextualizar a resposta
+ * @param tdeeKcal   TDEE estimado em kcal
  */
-export const suggestCarbCycleFromActivities = async (
-  days: { dayIndex: number; activity: string }[],
+export const interpretWeeklyRoutineWithAI = async (
+  rawText: string,
   userGoal: string,
   tdeeKcal: number
-): Promise<CarbCycleSuggestion[]> => {
-
-  const DAY_NAMES = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
-
-  const daysText = days
-    .map(d => `- ${DAY_NAMES[d.dayIndex]}: ${d.activity || 'sem descrição'}`)
-    .join('\n');
-
+): Promise<AIWeeklyCycleDay[]> => {
   const goalMap: Record<string, string> = {
     perder: 'perda de gordura (déficit calórico)',
     manter: 'manutenção de peso',
@@ -885,42 +879,40 @@ export const suggestCarbCycleFromActivities = async (
 
   const prompt = `Você é um nutricionista esportivo especialista em periodização de carboidratos (carb cycling).
 
-O usuário tem objetivo de ${goalLabel} e TDEE estimado de ${tdeeKcal} kcal/dia.
+O usuário tem objetivo de ${goalLabel} e TDEE de ${tdeeKcal} kcal/dia.
 
-Abaixo estão as atividades planejadas para cada dia da semana:
-${daysText}
+Ele descreveu a rotina da semana dele da seguinte forma:
+"${rawText}"
 
-## Regras para classificação:
+Sua tarefa é analisar esse texto e estruturar a semana de Segunda-feira (dayIndex: 0) até Domingo (dayIndex: 6). Para cada dia, você deve identificar a atividade realizada e o nível recomendado de carboidratos (high, mod ou low).
 
-**ALTO (high)** — dia de treino intenso (musculação pesada, HIIT, treino de força com séries compostas, corrida longa >45 min, esportes de alta intensidade). Requer reposição glicogênica máxima.
+## Regras de Classificação de Carboidratos:
+- **ALTO (high)**: Dias de treinos muito intensos (ex: musculação pesada, pernas, HIIT, corridas longas, esportes intensos).
+- **MODERADO (mod)**: Dias de treinos moderados (ex: musculação de membros superiores menores, cardio leve, funcional intermediário) ou quando a atividade for vaga (ex: "treino", "academia").
+- **BAIXO (low)**: Dias de descanso total, descanso ativo muito leve (caminhada leve, alongamento) ou sem nenhuma atividade descrita.
 
-**MODERADO (mod)** — dia de treino de intensidade média (musculação leve/isolada, caminhada rápida, treino funcional leve, yoga ativa, ciclismo moderado). Requer reposição parcial.
+## Regras de Formatação das Atividades:
+- Seja sucinto ao descrever a atividade (ex: "Musculação (Membros Superiores)", "Corrida 5km", "Futebol com amigos", "Descanso").
+- Se o usuário não mencionar um dia específico da semana, assuma que é um dia de "Descanso" (type: "low", reasoning: "Dia não mencionado no relato do usuário").
+- O reasoning deve ser uma explicação curta de até 10 palavras em português.
 
-**BAIXO (low)** — dia de descanso, descanso ativo (caminhada tranquila, alongamento, meditação), ou atividade de baixíssima intensidade. Sem necessidade de reposição significativa.
-
-## Instruções adicionais:
-- Se a atividade for vaga ou ambígua (ex: "academia", "treino"), classifique como mod e explique no reasoning.
-- Se não houver descrição, classifique como low.
-- Para objetivo de ganho de massa: prefira high ou mod mesmo em dias de descanso se o usuário treina muito.
-- Para objetivo de perda: prefira low em dias de descanso, mod em treinos médios.
-- O reasoning deve ser 1 frase curta, direta e em português (máx. 10 palavras).
-
-Retorne APENAS um JSON válido no formato:
+Retorne APENAS um JSON válido contendo a estrutura:
 {
   "days": [
-    { "dayIndex": 0, "type": "high", "reasoning": "Treino pesado exige reposição máxima de glicogênio" },
+    { "dayIndex": 0, "activity": "Musculação (Peito/Tríceps)", "type": "high", "reasoning": "Treino intenso exige cargas de glicogênio elevadas" },
     ...
   ]
 }`;
 
   const apiKey = process.env.API_KEY;
 
-  const parseSuggestions = (raw: string): CarbCycleSuggestion[] => {
+  const parseResult = (raw: string): AIWeeklyCycleDay[] => {
     const parsed = JSON.parse(raw);
     const arr = parsed.days ?? parsed;
-    if (!Array.isArray(arr)) throw new Error('Formato inválido');
+    if (!Array.isArray(arr)) throw new Error('Formato de resposta inválido');
     return arr.map((item: any) => ({
       dayIndex: Number(item.dayIndex),
+      activity: String(item.activity || 'Descanso'),
       type: ['high', 'mod', 'low'].includes(item.type) ? item.type : 'mod',
       reasoning: String(item.reasoning || ''),
     }));
@@ -938,10 +930,10 @@ Retorne APENAS um JSON válido no formato:
       });
       const jsonText = response.text?.trim();
       if (!jsonText) throw new Error('Resposta vazia da IA');
-      return parseSuggestions(jsonText);
+      return parseResult(jsonText);
     } catch (error) {
-      console.error('[CarbCycleSuggest] Falha na análise local:', error);
-      throw new Error('Falha ao gerar sugestão de ciclo localmente.');
+      console.error('[interpretWeeklyRoutineWithAI] Falha local:', error);
+      throw new Error('Falha ao interpretar rotina localmente.');
     }
   } else {
     const isLocalWebDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
@@ -963,10 +955,10 @@ Retorne APENAS um JSON válido no formato:
 
       const data = await response.json();
       const rawText = typeof data === 'string' ? data : (data.text || data.result || JSON.stringify(data));
-      return parseSuggestions(rawText);
+      return parseResult(rawText);
     } catch (error) {
-      console.error('[CarbCycleSuggest] Falha no proxy:', error);
-      throw new Error('Falha ao gerar sugestão de ciclo via servidor.');
+      console.error('[interpretWeeklyRoutineWithAI] Falha no proxy:', error);
+      throw new Error('Falha ao interpretar rotina via servidor.');
     }
   }
 };
