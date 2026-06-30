@@ -45,6 +45,8 @@ interface DashboardViewProps {
   isNative: boolean;
   hasProfile: boolean;
   onOpenProfile: () => void;
+  weeklyReminder?: any;
+  onNavigateToReminderFlow?: () => void;
 }
 
 const DashboardView: React.FC<DashboardViewProps> = ({
@@ -53,6 +55,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({
   isNative,
   hasProfile,
   onOpenProfile,
+  weeklyReminder,
+  onNavigateToReminderFlow,
 }) => {
   const goals = loadGoals();
   const { macros } = useDailyStats(history);
@@ -138,6 +142,14 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
     return currentTargets;
   }, [profile, activeSubTab, todayMacros, currentTargets, targets, effectiveTDEE]);
+
+  const isRoutineOutdated = useMemo(() => {
+    if (!weeklyReminder?.state?.lastWeekConfirmedAt) return true;
+    const lastDate = new Date(weeklyReminder.state.lastWeekConfirmedAt);
+    const diffTime = Math.abs(Date.now() - lastDate.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    return diffDays > 10;
+  }, [weeklyReminder?.state?.lastWeekConfirmedAt]);
 
   const waterGoalMet = hydration.percentage >= 100;
   const achievements = useAchievements(history, {
@@ -279,6 +291,29 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         </>
       ) : (
         <>
+          {/* Alerta de rotina desatualizada */}
+          {isRoutineOutdated && onNavigateToReminderFlow && (
+            <motion.button
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              onClick={onNavigateToReminderFlow}
+              className="w-full flex items-center justify-between bg-amber-500/10 border border-amber-500/20 rounded-2xl p-3.5 text-left hover:border-amber-500/30 transition-all active:scale-[0.99] gap-3"
+            >
+              <div className="flex items-center gap-3">
+                <span className="text-lg">🔄</span>
+                <div>
+                  <p className="text-xs font-semibold text-amber-300">Sua rotina pode estar desatualizada</p>
+                  <p className="text-[10px] text-gray-500 mt-0.5 leading-normal">
+                    Revisar e confirmar o ciclo de carboidratos desta semana.
+                  </p>
+                </div>
+              </div>
+              <svg className="w-4 h-4 text-gray-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </motion.button>
+          )}
+
           {/* Card do Ciclo de Carboidratos */}
           {profile && weekSummary && (
             <CarbCycleCard

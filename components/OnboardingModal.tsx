@@ -10,6 +10,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import type { UserProfile, ActivityLevel, Goal, Sex } from '../hooks/useUserProfile';
 import { calcTargets, saveUserProfile, carbLoadStrategy } from '../hooks/useUserProfile';
 import { saveGoals } from '../hooks/useDailyStats';
+import { useWeeklyCycleReminder } from '../hooks/useWeeklyCycleReminder';
+import { Capacitor } from '@capacitor/core';
+import { App as CapacitorApp } from '@capacitor/app';
 
 interface Props {
   onComplete: (profile: UserProfile) => void;
@@ -44,6 +47,7 @@ const OnboardingModal: React.FC<Props> = ({ onComplete, onSkip }) => {
   const [goal, setGoal] = useState<Goal>('manter');
   const [bodyFatPct, setBodyFatPct] = useState<number | undefined>(undefined);
   const [enableBodyFat, setEnableBodyFat] = useState(false);
+  const weeklyReminder = useWeeklyCycleReminder();
 
   const stepIndex = STEPS.indexOf(step);
   const progress = (stepIndex / (STEPS.length - 1)) * 100;
@@ -310,6 +314,44 @@ const OnboardingModal: React.FC<Props> = ({ onComplete, onSkip }) => {
                     </button>
                   ))}
                 </div>
+
+                {/* Seção Lembrete Semanal (apenas nativo) */}
+                {Capacitor.isNativePlatform() && (
+                  <div className="bg-gray-800/40 border border-gray-750/50 rounded-2xl p-4 flex flex-col gap-2 mt-1">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs font-bold text-gray-200">Lembrete Semanal do Ciclo</p>
+                        <p className="text-[10px] text-gray-500 mt-0.5">Lembrar de atualizar a rotina de treinos todo domingo às 22h</p>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={weeklyReminder.state.enabled}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            weeklyReminder.enable();
+                          } else {
+                            weeklyReminder.disable();
+                          }
+                        }}
+                        className="accent-emerald-500 w-4 h-4 rounded"
+                      />
+                    </div>
+
+                    {weeklyReminder.state.permissionStatus === 'denied' && (
+                      <div className="flex flex-col gap-2 mt-2 bg-red-950/20 border border-red-900/30 p-2.5 rounded-xl text-[10px] text-red-300">
+                        <p>Notificações bloqueadas nas configurações do celular. Habilite para receber os lembretes.</p>
+                        <button
+                          type="button"
+                          onClick={() => CapacitorApp.openSettings()}
+                          className="bg-red-500/20 text-red-400 font-bold px-2 py-1 rounded-md self-start border border-red-500/30"
+                        >
+                          Abrir Configurações
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="flex gap-3 mt-2">
                   <button onClick={back} className="flex-1 py-3 rounded-xl bg-gray-800 text-gray-400 font-medium border border-gray-700 hover:bg-gray-700">Voltar</button>
                   <button onClick={next} className="flex-1 py-3 rounded-xl bg-emerald-600 text-white font-bold hover:bg-emerald-500 transition-all">Ver minha meta</button>

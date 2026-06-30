@@ -1,0 +1,175 @@
+/**
+ * CarbCycleReminderFlow — Fluxo de atualização rápida da rotina semanal de treinos.
+ *
+ * Exibe um formulário simplificado para revisar os 7 dias da semana (Seg-Dom),
+ * ajustar as descrições dos treinos e as intensidades calóricas do ciclo.
+ */
+import React, { useState } from 'react';
+import { motion } from 'framer-motion';
+import type { CycleDay, CycleDayConfig } from '../hooks/useCarbCycle';
+
+interface CarbCycleReminderFlowProps {
+  currentConfig: CycleDayConfig[];
+  onSave: (updated: { dayIndex: number; type: CycleDay; activity: string }[]) => void;
+  onClose: () => void;
+  confirmWeekUpdated: () => void;
+  showToast: (msg: string) => void;
+}
+
+const DAY_LONG_NAMES = ['Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado', 'Domingo'];
+
+export const CarbCycleReminderFlow: React.FC<CarbCycleReminderFlowProps> = ({
+  currentConfig,
+  onSave,
+  onClose,
+  confirmWeekUpdated,
+  showToast,
+}) => {
+  // Estado local para edições
+  const [formDays, setFormDays] = useState<{ dayIndex: number; type: CycleDay; activity: string }[]>(() =>
+    currentConfig.map(cfg => ({
+      dayIndex: cfg.dayIndex,
+      type: cfg.type,
+      activity: cfg.activity,
+    }))
+  );
+
+  const handleActivityChange = (index: number, val: string) => {
+    setFormDays(prev =>
+      prev.map((d, i) => (i === index ? { ...d, activity: val } : d))
+    );
+  };
+
+  const handleTypeChange = (index: number, type: CycleDay) => {
+    setFormDays(prev =>
+      prev.map((d, i) => (i === index ? { ...d, type } : d))
+    );
+  };
+
+  const handleRepeatPrevious = () => {
+    // Apenas confirma a rotina atual/anterior sem alterações
+    confirmWeekUpdated();
+    onSave(formDays);
+    showToast('Rotina semanal anterior repetida e confirmada! 🔄');
+    onClose();
+  };
+
+  const handleSave = () => {
+    confirmWeekUpdated();
+    onSave(formDays);
+    showToast('Ciclo de carboidratos atualizado para esta semana! 🎉');
+    onClose();
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 15 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -15 }}
+      className="w-full max-w-md mx-auto flex flex-col gap-4 pb-8"
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-extrabold text-white tracking-tight">Como vai ser sua semana?</h2>
+          <p className="text-xs text-gray-400 mt-1">Confirme ou ajuste sua rotina — o ciclo será recalculado</p>
+        </div>
+        <button
+          onClick={onClose}
+          className="p-2 rounded-xl bg-gray-800 border border-gray-700 text-gray-400 hover:text-gray-200 transition-colors"
+          aria-label="Voltar"
+        >
+          ✕
+        </button>
+      </div>
+
+      {/* Ações Rápidas */}
+      <div className="flex gap-2">
+        <button
+          onClick={handleRepeatPrevious}
+          className="flex-1 bg-gray-850 hover:bg-gray-800 text-gray-200 border border-gray-750 font-bold py-2.5 px-4 rounded-xl text-xs transition-all active:scale-98 flex items-center justify-center gap-1.5"
+        >
+          🔄 Repetir semana anterior
+        </button>
+      </div>
+
+      {/* Lista de dias da semana */}
+      <div className="flex flex-col gap-3">
+        {formDays.map((d, i) => {
+          // Cores por tipo de dia
+          const labelColor =
+            d.type === 'high'
+              ? 'text-emerald-400'
+              : d.type === 'mod'
+              ? 'text-amber-400'
+              : 'text-indigo-400';
+
+          return (
+            <div
+              key={d.dayIndex}
+              className="bg-gray-800/40 border border-gray-750/50 rounded-2xl p-4 flex flex-col gap-3 transition-colors duration-200 hover:border-gray-700"
+            >
+              {/* Dia + Seletor de intensidade */}
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-bold text-gray-300">{DAY_LONG_NAMES[i]}</span>
+
+                {/* Pill selectors */}
+                <div className="flex bg-gray-900/50 border border-gray-800 p-0.5 rounded-lg">
+                  {(['high', 'mod', 'low'] as CycleDay[]).map(t => {
+                    const active = d.type === t;
+                    const activeStyle =
+                      t === 'high'
+                        ? 'bg-emerald-600/20 text-emerald-400 border-emerald-500/20'
+                        : t === 'mod'
+                        ? 'bg-amber-600/20 text-amber-400 border-amber-500/20'
+                        : 'bg-indigo-600/20 text-indigo-400 border-indigo-500/20';
+
+                    return (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => handleTypeChange(i, t)}
+                        className={`text-[9px] font-extrabold px-2.5 py-1 rounded transition-all uppercase ${
+                          active ? `${activeStyle} border font-black` : 'text-gray-500 hover:text-gray-400'
+                        }`}
+                      >
+                        {t === 'high' ? 'alto' : t === 'mod' ? 'mod' : 'baixo'}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Input de descrição de treino */}
+              <div>
+                <input
+                  type="text"
+                  value={d.activity}
+                  onChange={e => handleActivityChange(i, e.target.value)}
+                  placeholder="Ex: Treino de pernas, corrida, descanso..."
+                  className="w-full bg-gray-900 border border-gray-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-650 focus:outline-none focus:border-emerald-500/40 transition-colors"
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Botões finais */}
+      <div className="flex gap-3 mt-2">
+        <button
+          onClick={onClose}
+          className="flex-1 bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium py-3.5 rounded-2xl text-xs transition-all active:scale-95"
+        >
+          Cancelar
+        </button>
+        <button
+          onClick={handleSave}
+          className="flex-1 bg-gradient-to-r from-emerald-600 to-teal-500 hover:opacity-95 text-white font-extrabold py-3.5 rounded-2xl text-xs transition-all shadow-lg shadow-emerald-950/20 active:scale-95"
+        >
+          Atualizar Ciclo 🚀
+        </button>
+      </div>
+    </motion.div>
+  );
+};

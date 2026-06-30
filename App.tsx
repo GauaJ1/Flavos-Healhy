@@ -16,8 +16,15 @@ import HistoryView from './components/HistoryView';
 import CameraView from './components/CameraView';
 import { AnimatePresence, motion } from 'framer-motion';
 import { compressImage } from './utils/imageCompression';
+import { useWeeklyCycleReminder } from './hooks/useWeeklyCycleReminder';
+import { useCarbCycle } from './hooks/useCarbCycle';
+import { useAdaptiveTDEE } from './hooks/useAdaptiveTDEE';
+import { useWeight } from './hooks/useWeight';
+import { CarbCycleReminderFlow } from './components/CarbCycleReminderFlow';
+import { Capacitor } from '@capacitor/core';
+import { LocalNotifications } from '@capacitor/local-notifications';
 
-type View = 'upload' | 'preview' | 'analysis' | 'history' | 'camera' | 'dashboard';
+type View = 'upload' | 'preview' | 'analysis' | 'history' | 'camera' | 'dashboard' | 'carbCycleReminder';
 type Tab = 'upload' | 'dashboard' | 'history';
 
 const MAINTENANCE_DOMAINS: string[] = [];
@@ -58,10 +65,56 @@ const App: React.FC = () => {
   const [view, setView] = useState<View>('upload');
   const [activeTab, setActiveTab] = useState<Tab>('upload');
 
-  const { history, addHistoryEntry, removeHistoryEntry } = useMealHistory();
+  const { history, addHistoryEntry, removeHistoryEntry, updateHistoryEntry } = useMealHistory();
   const healthSync = useHealthSync();
   const { profile, targets, hasProfile, updateProfile } = useUserProfile();
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Instanciar hooks de metabolismo, ciclo de carboidratos e lembretes
+  const weeklyReminder = useWeeklyCycleReminder();
+  const weight = useWeight(healthSync.isSyncEnabled);
+  const {
+    state: tdeeState,
+    effectiveTarget,
+  } = useAdaptiveTDEE(
+    weight.entries,
+    history,
+    targets?.tdeeKcal ?? 2000,
+    profile?.goal ?? 'manter'
+  );
+  const {
+    weekConfig,
+    updateDayType,
+  } = useCarbCycle(effectiveTarget, profile);
+
+  // Reschedule defensivo de lembretes ao inicializar o app
+  useEffect(() => {
+    if (Capacitor.isNativePlatform() && weeklyReminder.state.enabled) {
+      const overdue = !weeklyReminder.state.nextScheduledAt ||
+        new Date(weeklyReminder.state.nextScheduledAt) < new Date();
+      if (overdue) {
+        weeklyReminder.enable();
+      }
+    }
+  }, [weeklyReminder]);
+
+  // Listener para Clique em Notificação (Deep Link)
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    const handle = LocalNotifications.addListener(
+      'localNotificationActionPerformed',
+      (action) => {
+        if (action.notification.extra?.deepLink === 'carbCycle:update') {
+          goToTab('dashboard');
+          setView('carbCycleReminder');
+        }
+      }
+    );
+    return () => {
+      handle.remove();
+    };
+  }, [goToTab]);
 
   // Escutar evento de relatório semanal
   useEffect(() => {
@@ -257,7 +310,36 @@ const App: React.FC = () => {
               isNative={healthSync.isNative}
               hasProfile={hasProfile}
               onOpenProfile={() => setShowOnboarding(true)}
+              weeklyReminder={weeklyReminder}
+              onNavigateToReminderFlow={() => setView('carbCycleReminder')}
             />
+          </motion.div>
+        );
+
+      // ── Carb Cycle Reminder Flow ───────────────────────────────────────────
+      case 'carbCycleReminder':
+        return (
+          <motion.div key="carbCycleReminder" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }} className="w-full flex justify-center">
+            {profile && weekConfig && (
+              <CarbCycleReminderFlow
+                currentConfig={weekConfig}
+                onSave={(updated) => {
+                  updated.forEach(item => {
+                    updateDayType(item.dayIndex, item.type, item.activity);
+                  });
+                }}
+                onClose={() => {
+                  setView('dashboard');
+                  setActiveTab('dashboard');
+                }}
+                confirmWeekUpdated={weeklyReminder.confirmWeekUpdated}
+                showToast={(msg) => {
+                  setToastMessage(msg);
+                  setTimeout(() => setToastMessage(null), 4000);
+                }}
+              />
+            )}
           </motion.div>
         );
 
