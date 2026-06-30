@@ -15,6 +15,7 @@ interface CarbCycleCardProps {
   onSelectDay: (idx: number) => void;
   onUpdateDayType: (dayIndex: number, type: CycleDay, activity?: string) => void;
   baseCalories: number;
+  onEditRoutine?: () => void;
 }
 
 const TYPE_LABELS: Record<CycleDay, string> = {
@@ -31,6 +32,7 @@ export const CarbCycleCard: React.FC<CarbCycleCardProps> = ({
   onSelectDay,
   onUpdateDayType,
   baseCalories,
+  onEditRoutine,
 }) => {
   const day = summary.days[selectedDay];
   if (!day) return null;
@@ -47,7 +49,18 @@ export const CarbCycleCard: React.FC<CarbCycleCardProps> = ({
       <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-4 flex flex-col gap-3">
         <div className="flex justify-between items-start">
           <div>
-            <h3 className="text-base font-bold text-white">Ciclo com TDEE Real</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="text-base font-bold text-white">Ciclo com TDEE Real</h3>
+              {onEditRoutine && (
+                <button
+                  onClick={onEditRoutine}
+                  className="text-[10px] text-violet-400 hover:text-violet-300 font-bold border border-violet-500/20 px-2 py-0.5 rounded-lg bg-violet-950/20 transition-all hover:bg-violet-950/40"
+                  title="Editar atividades e treinos da semana"
+                >
+                  ✏️ Editar Semana
+                </button>
+              )}
+            </div>
             <p className="text-xs text-gray-400 mt-0.5">Distribuição baseada no seu gasto real estimado</p>
           </div>
           <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold px-2 py-0.5 rounded-full">

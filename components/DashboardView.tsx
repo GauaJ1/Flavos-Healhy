@@ -322,6 +322,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
               onSelectDay={setSelectedDay}
               onUpdateDayType={updateDayType}
               baseCalories={effectiveTarget}
+              onEditRoutine={onNavigateToReminderFlow}
             />
           )}
         </>
