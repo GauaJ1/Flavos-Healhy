@@ -33,7 +33,6 @@ import AchievementsPanel from './AchievementsPanel';
 import DiversityPanel from './DiversityPanel';
 import { MealPlanPanel } from './MealPlanPanel';
 import WeeklyReportCard from './WeeklyReportCard';
-import WeeklyReportCharts from './WeeklyReportCharts';
 import WellbeingPanel from './WellbeingPanel';
 import { AdaptiveTDEECard } from './AdaptiveTDEECard';
 import { CarbCycleCard } from './CarbCycleCard';
@@ -376,9 +375,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
           hasMinimumHistory={history.length >= 3}
           calorieGoal={todayGoals.calories}
         />
-        {history.length >= 2 && (
-          <WeeklyReportCharts history={history} />
-        )}
+
       </div>
 
       {/* Correlações e Bem-Estar (Fase 4) */}
