@@ -1,31 +1,44 @@
-import { GoogleGenAI, Type } from '@google/genai';
+import { Type } from '@google/genai';
 import type { AnalysisResult } from '../types';
-import { findTACOMatch, isCompositeDish } from '../utils/tacoDatabase';
+import { isCompositeDish } from '../utils/tacoDatabase';
+import { findEnrichmentMatch } from '../utils/food-search';
 import { classifyFoodGroup } from '../hooks/useFoodDiversity';
-
-// O cliente do GoogleGenAI não é inicializado globalmente para evitar erros 
-// em produção quando a chave process.env.API_KEY estiver vazia.
+//geminiService.ts
+// ──────────────────────────────────────────────────────────────
+// Proxy URL helper — toda chamada à IA vai SEMPRE pelo backend Vercel.
+// A chave Gemini (API_KEY / GEMINI_API_KEY) NUNCA existe no bundle cliente.
+// ──────────────────────────────────────────────────────────────
+function getProxyUrl(): string {
+  const isCapacitor =
+    typeof window !== 'undefined' &&
+    (Object.prototype.hasOwnProperty.call(window, 'Capacitor') ||
+      window.location.protocol.startsWith('capacitor') ||
+      window.location.protocol.startsWith('http-case'));
+  const isLocalWeb =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1');
+  return isLocalWeb && !isCapacitor
+    ? '/api/analyze'
+    : 'https://healthy.flavoscompany.xyz/api/analyze';
+}
 
 // ──────────────────────────────────────────────────────────────
 // Guard-rail constants for enforceConsistency
 // ──────────────────────────────────────────────────────────────
 
 /**
- * Minimum trigram similarity for TACO enrichment to be applied.
+ * Minimum Dice similarity for TACO/IBGE enrichment to be applied.
  * Below this threshold the IA-generated macros are kept as-is.
- * Bug context: "tapioca com frango, ovo e queijo" was matched against
- * "tapioca crua" (similarity ~0.55) and its macros REPLACED, causing
- * the protein to collapse to ~3 g. Raising the bar to 0.82 prevents
- * composite-dish names from accidentally matching simple ingredients.
  */
-const MIN_TACO_SIMILARITY = 0.82;
+const MIN_TACO_SIMILARITY = 0.65;
 
 /**
- * Maximum allowed relative deviation between the AI macro and the TACO
+ * Maximum allowed relative deviation between the AI macro and the TACO/IBGE
  * macro before the enrichment is considered unreliable and discarded.
  * Formula: |ai - taco| / max(ai, 1) > MAX_MACRO_DEVIATION → skip
  */
-const MAX_MACRO_DEVIATION = 0.35;
+const MAX_MACRO_DEVIATION = 0.30;
 
 // ──────────────────────────────────────────────────────────────
 // Schema JSON — Referência canônica (alinhado com SKILL.md)
@@ -128,7 +141,7 @@ const responseSchema = {
           consumedFraction: { type: Type.NUMBER, description: 'Fração consumida. Sempre 1.0 inicialmente (usuário ajusta depois).' },
           healthHighlights: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'Destaques positivos do alimento.' },
           attentionHighlights: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'Pontos de atenção (sem julgamento).' },
-          processingLevel: { type: Type.STRING, description: '"in_natura", "minimamente_processado", "processado", "ultraprocessado" ou "indeterminado".' },
+          processingLevel: { type: Type.STRING, description: '"in natura", "minimamente processado", "processado" ou "ultraprocessado".' },
           possibleAddedSugars: { type: Type.BOOLEAN, description: 'True apenas se houver açúcar ADICIONADO (não natural da fruta).' },
           possibleAddedFats: { type: Type.BOOLEAN, description: 'True apenas se houver gordura ADICIONADA (óleo, manteiga, fritura).' },
           possibleExcessSodium: { type: Type.BOOLEAN, description: 'True se houver risco de sódio elevado.' },
@@ -166,15 +179,29 @@ const IDR_BRASIL: Record<string, number> = {
   fiber_g: 25,
 };
 
-function buildPrompt(userContext?: string): string {
-  let prompt = `Você é um especialista em nutrição com foco em alimentação brasileira.
-Analise a imagem enviada e responda SOMENTE com um JSON válido, sem markdown, sem prefácio.
+// ──────────────────────────────────────────────────────────────
+// Identidade e regras fixas do modelo (espelhada de api/analyze.ts)
+// Passada via config.systemInstruction em analyze.ts (server-side).
+// Aqui serve como referência documental e para testes locais.
+// ──────────────────────────────────────────────────────────────
+export const SYSTEM_INSTRUCTION = `Você é um especialista em nutrição com foco em alimentação brasileira.
+Sua função é analisar imagens de refeições e retornar um JSON nutricional preciso, baseado na Tabela TACO/IBGE.
+Regras fixas que NUNCA mudam:
+- Responda SOMENTE com JSON válido, sem markdown, sem prefácio, sem explicações extras.
+- NUNCA invente alimentos não visíveis nem deduzíveis pela imagem.
+- NUNCA use "faz mal", "proibido", "comida ruim" ou faça diagnósticos médicos.
+- Use SEMPRE dados da Tabela TACO como referência de macros por 100g.
+- Priorize alimentos cozidos/prontos para consumo — nunca use valores de alimento cru se o alimento aparece cozido.`;
 
-## REGRAS OBRIGATÓRIAS
+function buildPrompt(userContext?: string): string {
+  // NOTA: A persona/systemInstruction é passada via config.systemInstruction no server (analyze.ts),
+  // não no corpo do prompt. Aqui ficam apenas as etapas da tarefa + exemplos few-shot.
+  let prompt = `## REGRAS OBRIGATÓRIAS
 
 1. Se a imagem NÃO contiver alimento identificável, retorne isRealFood: false e zere tudo.
 2. Nunca invente alimentos que não são visíveis nem deduzíveis pelo contexto visual.
 3. Se houver dúvida sobre um alimento, use confidence: "baixa" e gere followUpQuestion.
+4. Use SEMPRE a Tabela TACO como referência de macros (valores por 100g, depois escale pelo peso estimado).
 
 ## ETAPA 1 — IDENTIFICAÇÃO
 - Identifique CADA alimento visível: prato principal, acompanhamentos, molhos, farofas, saladas, bebidas, sobremesas, produtos embalados.
@@ -221,6 +248,21 @@ Use referências visuais brasileiras para estimar o peso de cada alimento:
 - 1 lata de refrigerante ≈ 350ml → 140 kcal
 Considere profundidade e empilhamento. Evite falsa precisão — quando houver dúvida, gere follow-up.
 
+## EXEMPLOS FEW-SHOT DE ESTIMATIVA CORRETA (âncora TACO)
+Use os valores abaixo como referência exata para calibrar suas estimativas:
+
+Exemplo 1 — Prato de almoço típico:
+- arroz branco cozido: 150g → carb 38.1g | prot 2.5g | gord 0.3g | 166kcal
+- feijão carioca cozido: 140g → carb 19.6g | prot 7.0g | gord 0.7g | 108kcal
+- peito de frango grelhado: 120g → carb 0g | prot 38.4g | gord 3.0g | 183kcal
+
+Exemplo 2 — Tapioca recheada (SEMPRE decomposta em base + recheio):
+- goma de tapioca: 50g → carb 30.0g | prot 0.1g | gord 0g | 121kcal
+- queijo minas frescal: 30g → carb 0.5g | prot 4.9g | gord 3.5g | 52kcal
+
+Exemplo 3 — Ovo cozido (valores TACO, não cru):
+- ovo de galinha cozido: 60g → carb 0.4g | prot 8.0g | gord 5.7g | 83kcal
+
 ## ETAPA 3 — CÁLCULO POR ALIMENTO (foods[])
 Para CADA alimento:
 - Calcule calories, protein, carbohydrates, fat baseado no peso estimado × valores nutricionais TACO/IBGE.
@@ -230,7 +272,7 @@ Para CADA alimento:
   - Inclua apenas os que tenham >5% da necessidade diária.
 - Considere método de preparo: fritura adiciona ~30% de calorias, grelha mantém, refogado adiciona ~15%.
 - consumedFraction = 1.0 (padrão, o usuário ajusta depois).
-- processingLevel: classificar de "in_natura" a "ultraprocessado".
+- processingLevel: classificar de "in natura" a "ultraprocessado".
 - Marque flags (possibleAddedSugars, possibleAddedFats, etc.) APENAS para adições industriais/artificiais.
 
 ## ETAPA 4 — TOTAIS (nutritionalSummary)
@@ -283,13 +325,13 @@ function isTACODevAcceptable(
   return protDev <= MAX_MACRO_DEVIATION && carbDev <= MAX_MACRO_DEVIATION;
 }
 
-export function enforceConsistency(result: AnalysisResult): AnalysisResult {
+export async function enforceConsistency(result: AnalysisResult): Promise<AnalysisResult> {
   if (!result.foods || result.foods.length === 0) {
     return result;
   }
 
   let totalAntiInflammatory = 0;
-  let antiInflammatoryCount = 0;
+  let totalWeightGrams = 0;
 
   const totalMicroValues = {
     iron_mg: 0,
@@ -303,8 +345,10 @@ export function enforceConsistency(result: AnalysisResult): AnalysisResult {
     fiber_g: 0,
   };
 
-  result.foods.forEach((food, i) => {
-    if (!food.id) food.id = `food_${i + 1}`;
+  let i = 0;
+  for (const food of result.foods) {
+    i++;
+    if (!food.id) food.id = `food_${i}`;
     if (food.consumedFraction === undefined || food.consumedFraction === null) {
       food.consumedFraction = 1.0;
     }
@@ -312,28 +356,26 @@ export function enforceConsistency(result: AnalysisResult): AnalysisResult {
     // @ts-ignore
     food.foodGroup = food.foodGroup || classifyFoodGroup(food.name) || 'outro';
 
-    // ─── TACO ENRICHMENT GUARD-RAILS ──────────────────────────────────────────
+    // ─── TACO/IBGE ENRICHMENT GUARD-RAILS ─────────────────────────────────────
     // RULE 1 — Never override a composite dish name:
     //   "tapioca com frango, ovo e queijo" must NOT be matched against
-    //   "tapioca" in the TACO table. By this point the AI should have already
-    //   decomposed the dish (via the prompt REGRA DE DECOMPOSIÇÃO), but this
-    //   guard is a safety net for any item that slipped through.
-    // RULE 2 — MIN_TACO_SIMILARITY threshold (0.82):
-    //   Only apply TACO data when the fuzzy match is very confident.
-    // RULE 3 — MAX_MACRO_DEVIATION (35%):
-    //   If the TACO protein or carb differs >35% from the AI value, skip.
-    //   This prevents wrong category matches (e.g., frango → farinha de frango).
+    //   "tapioca" in the TACO table.
+    // RULE 2 — MIN_TACO_SIMILARITY threshold (0.65):
+    //   Only apply TACO/IBGE data when the fuzzy match is confident.
+    // RULE 3 — MAX_MACRO_DEVIATION (30%):
+    //   If the TACO/IBGE protein or carb differs >30% from the AI value, skip.
     // ──────────────────────────────────────────────────────────────────────────
 
     const composite = isCompositeDish(food.name);
     const matchInfo = composite
-      ? null // RULE 1: composite dishes are never TACO-overridden
-      : findTACOMatch(food.name, undefined, MIN_TACO_SIMILARITY); // RULE 2
+      ? null // RULE 1: composite dishes are never TACO/IBGE-overridden
+      : await findEnrichmentMatch(food.name, MIN_TACO_SIMILARITY); // RULE 2 (TACO + IBGE fallback)
 
     let tacoApplied = false;
 
     if (matchInfo) {
       const match = matchInfo.match;
+      food.dataSource = matchInfo.source;
       const factor = food.estimatedWeightGrams / 100;
 
       const tacoProtein = Math.round(match.protein * factor * 10) / 10;
@@ -341,9 +383,7 @@ export function enforceConsistency(result: AnalysisResult): AnalysisResult {
 
       // RULE 3: Deviation guard
       if (isTACODevAcceptable(food.protein || 0, tacoProtein, food.carbohydrates || 0, tacoCarbs)) {
-        // ✅ Safe to enrich — apply TACO secondary nutrients (fiber, sugar, sodium,
-        //    saturatedFat, micronutrients, glycemicIndex) while KEEPING calories
-        //    derived from the AI macros after applying TACO main macros.
+        // ✅ Safe to enrich — apply TACO/IBGE secondary nutrients
         food.carbohydrates = tacoCarbs;
         food.protein       = tacoProtein;
         food.fat           = Math.round(match.fat * factor * 10) / 10;
@@ -354,9 +394,9 @@ export function enforceConsistency(result: AnalysisResult): AnalysisResult {
         food.saturatedFat  = Math.round(match.saturatedFat * factor * 10) / 10;
 
         // @ts-ignore
-        food.glycemicIndex = match.glycemicIndex;
+        food.glycemicIndex = match.glycemicIndex || 0;
         // @ts-ignore
-        food.glycemicLoad = Math.round(((match.glycemicIndex * food.carbohydrates) / 100) * 10) / 10;
+        food.glycemicLoad = Math.round((((match.glycemicIndex || 0) * food.carbohydrates) / 100) * 10) / 10;
 
         // @ts-ignore
         food.fiberDetailed = {
@@ -401,9 +441,10 @@ export function enforceConsistency(result: AnalysisResult): AnalysisResult {
         });
         food.micronutrientEstimates = estimates.sort((a, b) => b.percentage - a.percentage);
 
-        // @ts-ignore
-        totalAntiInflammatory += match.antiInflammatoryScore;
-        antiInflammatoryCount++;
+        // Fix 5: Ponderação por peso (estimatedWeightGrams)
+        const itemScore = match.antiInflammatoryScore || 5.0;
+        totalAntiInflammatory += itemScore * food.estimatedWeightGrams;
+        totalWeightGrams += food.estimatedWeightGrams;
 
         totalMicroValues.iron_mg        += micro.iron_mg;
         totalMicroValues.calcium_mg     += micro.calcium_mg;
@@ -418,7 +459,7 @@ export function enforceConsistency(result: AnalysisResult): AnalysisResult {
       } else {
         // Deviation too large — log and fall through to the "AI-only" path
         console.warn(
-          `[enforceConsistency] TACO deviation too large for "${food.name}" ` +
+          `[enforceConsistency] TACO/IBGE deviation too large for "${food.name}" ` +
           `(sim=${matchInfo.similarity.toFixed(2)}, matched="${match.name}"). ` +
           'Keeping AI macros.',
         );
@@ -475,9 +516,11 @@ export function enforceConsistency(result: AnalysisResult): AnalysisResult {
       totalMicroValues.zinc_mg        += micro.zinc_mg;
       totalMicroValues.vitaminB12_mcg += micro.vitaminB12_mcg;
 
-      totalAntiInflammatory += food.processingLevel === 'ultraprocessado' ? 2
+      // Fix 5: Ponderação por peso (estimatedWeightGrams) no caminho AI-only
+      const itemScore = food.processingLevel === 'ultraprocessado' ? 2
         : food.processingLevel === 'processado' ? 4 : 6;
-      antiInflammatoryCount++;
+      totalAntiInflammatory += itemScore * food.estimatedWeightGrams;
+      totalWeightGrams += food.estimatedWeightGrams;
     }
 
     // ── Always recalculate calories from macros (do NOT trust baseCalories) ──
@@ -485,7 +528,7 @@ export function enforceConsistency(result: AnalysisResult): AnalysisResult {
     const protCal = (food.protein       || 0) * 4;
     const fatCal  = (food.fat           || 0) * 9;
     food.calories = Math.round(carbCal + protCal + fatCal);
-  });
+  }
 
   // ── Recalculate summary from foods[] (never from AI's baseCalories) ─────────
   const calculatedCalories = result.foods.reduce((sum, food) => sum + (food.calories || 0), 0);
@@ -513,9 +556,9 @@ export function enforceConsistency(result: AnalysisResult): AnalysisResult {
     result.foods.reduce((s, f) => s + (f.saturatedFat || 0), 0) * 10
   ) / 10;
 
-  // Fase 1: Calcular score anti-inflamatório médio
-  result.nutritionalSummary.antiInflammatoryScore = antiInflammatoryCount > 0
-    ? Math.round((totalAntiInflammatory / antiInflammatoryCount) * 10) / 10
+  // Fix 5: Calcular score anti-inflamatório médio ponderado por peso
+  result.nutritionalSummary.antiInflammatoryScore = totalWeightGrams > 0
+    ? Math.round((totalAntiInflammatory / totalWeightGrams) * 10) / 10
     : 5.0;
 
   // Fase 1: Calcular percentuais de cobertura diária (% da IDR ANVISA)
@@ -535,82 +578,24 @@ export function enforceConsistency(result: AnalysisResult): AnalysisResult {
 // ──────────────────────────────────────────────────────────────
 
 export const analyzeImage = async (base64Image: string, userContext?: string): Promise<AnalysisResult> => {
-  const apiKey = process.env.API_KEY;
-
-  if (apiKey) {
-    // -------------------------------------------------------------------------
-    // Desenvolvimento Local: Chamada direta à API do Gemini usando chave do .env
-    // -------------------------------------------------------------------------
-    const imagePart = {
-      inlineData: {
-        mimeType: 'image/jpeg',
-        data: base64Image
-      }
-    };
-
-    const promptText = buildPrompt(userContext);
-    const textPart = { text: promptText };
-
-    try {
-      const localAi = new GoogleGenAI({ apiKey });
-      const response = await localAi.models.generateContent({
-        model: 'gemini-3.1-flash-lite',
-        contents: { parts: [imagePart, textPart] },
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: responseSchema,
-        }
-      });
-
-      const jsonText = response.text?.trim();
-      if (!jsonText) {
-        throw new Error('Resposta vazia da IA');
-      }
-
-      const parsed = JSON.parse(jsonText) as AnalysisResult;
-      return enforceConsistency(parsed);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Erro desconhecido';
-      console.error('[NutritionAnalysis] Falha na análise local:', message);
-      throw new Error('Falha ao processar a imagem localmente. Tente novamente.');
+  // Sempre usa o proxy serverless — a API key nunca está no bundle do cliente.
+  const proxyUrl = getProxyUrl();
+  try {
+    const response = await fetch(proxyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageBase64: base64Image, userContext }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Erro HTTP no proxy: ${response.status} - ${errorText}`);
     }
-  } else {
-    // -------------------------------------------------------------------------
-    // Produção / APK Nativo: Chamada segura através do Backend Proxy na Vercel
-    // -------------------------------------------------------------------------
-    const isLocalWebDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    
-    // No app Capacitor no celular, window.location é http://localhost ou capacitor://localhost,
-    // então precisamos apontar obrigatoriamente para a URL absoluta da produção.
-    const hasCapacitor = window.hasOwnProperty('Capacitor') || window.location.protocol.startsWith('capacitor') || window.location.protocol.startsWith('http-case');
-    const proxyUrl = (isLocalWebDev && !hasCapacitor)
-      ? '/api/analyze'
-      : 'https://healthy.flavoscompany.xyz/api/analyze';
-
-    try {
-      const response = await fetch(proxyUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          imageBase64: base64Image,
-          userContext
-        })
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Erro HTTP no proxy: ${response.status} - ${errorText}`);
-      }
-
-      const parsed = await response.json() as AnalysisResult;
-      return enforceConsistency(parsed);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Erro desconhecido';
-      console.error('[NutritionAnalysis] Falha na análise via proxy:', message);
-      throw new Error('Falha ao processar a imagem via servidor de produção. Tente novamente.');
-    }
+    const parsed = await response.json() as AnalysisResult;
+    return await enforceConsistency(parsed);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erro desconhecido';
+    console.error('[NutritionAnalysis] Falha na análise via proxy:', message);
+    throw new Error('Falha ao processar a imagem via servidor de produção. Tente novamente.');
   }
 };
 
@@ -627,53 +612,20 @@ Responda APENAS com um objeto JSON válido no seguinte formato:
 
 Tom: empático, construtivo, leve. Nunca usar: "ruim", "errado", "proibido", "faz mal", "você errou", "não deveria". Começar com algo positivo.`;
 
-  const apiKey = process.env.API_KEY;
-
-  if (apiKey) {
-    try {
-      const localAi = new GoogleGenAI({ apiKey });
-      const response = await localAi.models.generateContent({
-        model: 'gemini-3.1-flash-lite',
-        contents: [{ text: prompt }],
-        config: {
-          responseMimeType: "application/json",
-        }
-      });
-      const jsonText = response.text?.trim();
-      if (!jsonText) throw new Error('Resposta vazia da IA');
-      return JSON.parse(jsonText);
-    } catch (error) {
-      console.error('[WeeklyReport] Falha na análise local:', error);
-      throw new Error('Falha ao gerar o relatório localmente.');
+  try {
+    const response = await fetch(getProxyUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ textPrompt: prompt }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Erro HTTP no proxy: ${response.status} - ${errorText}`);
     }
-  } else {
-    const isLocalWebDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const hasCapacitor = window.hasOwnProperty('Capacitor') || window.location.protocol.startsWith('capacitor') || window.location.protocol.startsWith('http-case');
-    const proxyUrl = (isLocalWebDev && !hasCapacitor)
-      ? '/api/analyze'
-      : 'https://healthy.flavoscompany.xyz/api/analyze';
-
-    try {
-      const response = await fetch(proxyUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          textPrompt: prompt
-        })
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Erro HTTP no proxy: ${response.status} - ${errorText}`);
-      }
-
-      return await response.json();
-    } catch (error) {
-      console.error('[WeeklyReport] Falha no proxy:', error);
-      throw new Error('Falha ao gerar o relatório via servidor.');
-    }
+    return await response.json();
+  } catch (error) {
+    console.error('[WeeklyReport] Falha no proxy:', error);
+    throw new Error('Falha ao gerar o relatório via servidor.');
   }
 };
 
@@ -690,50 +642,21 @@ Regras:
 - Só gerar insight se houver algum bucket com >=5 amostras. Se não houver amostras suficientes, responda apenas: null.
 - Responder apenas com o texto do insight, sem prefácio, sem JSON.`;
 
-  const apiKey = process.env.API_KEY;
-
-  if (apiKey) {
-    try {
-      const localAi = new GoogleGenAI({ apiKey });
-      const response = await localAi.models.generateContent({
-        model: 'gemini-3.1-flash-lite',
-        contents: [{ text: prompt }],
-      });
-      const text = response.text?.trim() || 'null';
-      return text === 'null' ? null : text;
-    } catch (error) {
-      console.error('[CorrelationInsight] Falha na análise local:', error);
-      return null;
+  try {
+    const response = await fetch(getProxyUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ textPrompt: prompt }),
+    });
+    if (!response.ok) {
+      throw new Error(`Erro HTTP no proxy: ${response.status}`);
     }
-  } else {
-    const isLocalWebDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const hasCapacitor = window.hasOwnProperty('Capacitor') || window.location.protocol.startsWith('capacitor') || window.location.protocol.startsWith('http-case');
-    const proxyUrl = (isLocalWebDev && !hasCapacitor)
-      ? '/api/analyze'
-      : 'https://healthy.flavoscompany.xyz/api/analyze';
-
-    try {
-      const response = await fetch(proxyUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          textPrompt: prompt
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Erro HTTP no proxy: ${response.status}`);
-      }
-
-      const parsed = await response.json();
-      const text = (typeof parsed === 'string' ? parsed : (parsed.text || parsed.insight || JSON.stringify(parsed))).trim();
-      return text === 'null' ? null : text;
-    } catch (error) {
-      console.error('[CorrelationInsight] Falha no proxy:', error);
-      return null;
-    }
+    const parsed = await response.json();
+    const text = (typeof parsed === 'string' ? parsed : (parsed.text || parsed.insight || JSON.stringify(parsed))).trim();
+    return text === 'null' ? null : text;
+  } catch (error) {
+    console.error('[CorrelationInsight] Falha no proxy:', error);
+    return null;
   }
 };
 
@@ -779,55 +702,24 @@ Regras das sugestões:
 Retorne APENAS um array JSON de strings com as 2 sugestões de refeições, sem qualquer outra introdução ou explicação.
 Formato de resposta esperado: ["Sugestão 1...", "Sugestão 2..."]`;
 
-  const apiKey = process.env.API_KEY;
   let suggestions: string[] = [];
 
-  if (apiKey) {
-    try {
-      const localAi = new GoogleGenAI({ apiKey });
-      const response = await localAi.models.generateContent({
-        model: 'gemini-3.1-flash-lite',
-        contents: [{ text: prompt }],
-        config: {
-          responseMimeType: "application/json",
-        }
-      });
-      const jsonText = response.text?.trim();
-      if (jsonText) {
-        suggestions = JSON.parse(jsonText);
+  try {
+    const response = await fetch(getProxyUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ textPrompt: prompt }),
+    });
+    if (response.ok) {
+      const data = await response.json();
+      if (Array.isArray(data)) {
+        suggestions = data;
+      } else if (data.text) {
+        suggestions = JSON.parse(data.text);
       }
-    } catch (error) {
-      console.error('[MealSuggestions] Falha na análise local:', error);
     }
-  } else {
-    const isLocalWebDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const hasCapacitor = window.hasOwnProperty('Capacitor') || window.location.protocol.startsWith('capacitor') || window.location.protocol.startsWith('http-case');
-    const proxyUrl = (isLocalWebDev && !hasCapacitor)
-      ? '/api/analyze'
-      : 'https://healthy.flavoscompany.xyz/api/analyze';
-
-    try {
-      const response = await fetch(proxyUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          textPrompt: prompt
-        })
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (Array.isArray(data)) {
-          suggestions = data;
-        } else if (data.text) {
-          suggestions = JSON.parse(data.text);
-        }
-      }
-    } catch (error) {
-      console.error('[MealSuggestions] Falha no proxy:', error);
-    }
+  } catch (error) {
+    console.error('[MealSuggestions] Falha no proxy:', error);
   }
 
   // Fallback se a IA falhar
@@ -904,8 +796,6 @@ Retorne APENAS um JSON válido contendo a estrutura:
   ]
 }`;
 
-  const apiKey = process.env.API_KEY;
-
   const parseResult = (raw: string): AIWeeklyCycleDay[] => {
     const parsed = JSON.parse(raw);
     const arr = parsed.days ?? parsed;
@@ -918,48 +808,21 @@ Retorne APENAS um JSON válido contendo a estrutura:
     }));
   };
 
-  if (apiKey) {
-    try {
-      const localAi = new GoogleGenAI({ apiKey });
-      const response = await localAi.models.generateContent({
-        model: 'gemini-3.1-flash-lite',
-        contents: [{ text: prompt }],
-        config: {
-          responseMimeType: 'application/json',
-        },
-      });
-      const jsonText = response.text?.trim();
-      if (!jsonText) throw new Error('Resposta vazia da IA');
-      return parseResult(jsonText);
-    } catch (error) {
-      console.error('[interpretWeeklyRoutineWithAI] Falha local:', error);
-      throw new Error('Falha ao interpretar rotina localmente.');
+  try {
+    const response = await fetch(getProxyUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ textPrompt: prompt }),
+    });
+    if (!response.ok) {
+      throw new Error(`Erro HTTP no proxy: ${response.status}`);
     }
-  } else {
-    const isLocalWebDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const hasCapacitor = window.hasOwnProperty('Capacitor') || window.location.protocol.startsWith('capacitor');
-    const proxyUrl = (isLocalWebDev && !hasCapacitor)
-      ? '/api/analyze'
-      : 'https://healthy.flavoscompany.xyz/api/analyze';
-
-    try {
-      const response = await fetch(proxyUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ textPrompt: prompt }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Erro HTTP no proxy: ${response.status}`);
-      }
-
-      const data = await response.json();
-      const rawText = typeof data === 'string' ? data : (data.text || data.result || JSON.stringify(data));
-      return parseResult(rawText);
-    } catch (error) {
-      console.error('[interpretWeeklyRoutineWithAI] Falha no proxy:', error);
-      throw new Error('Falha ao interpretar rotina via servidor.');
-    }
+    const data = await response.json();
+    const rawText = typeof data === 'string' ? data : (data.text || data.result || JSON.stringify(data));
+    return parseResult(rawText);
+  } catch (error) {
+    console.error('[interpretWeeklyRoutineWithAI] Falha no proxy:', error);
+    throw new Error('Falha ao interpretar rotina via servidor.');
   }
 };
 

@@ -84,17 +84,20 @@ export function calculateNutritionScore(result: AnalysisResult): NutritionScore 
     macroBalance = Math.max(0, Math.round(15 - (avgDev / 25) * 15));
   }
 
-  // 6. Processamento (0-15): baseado na proporção calórica de in_natura/minimamente processado
+  // 6. Processamento (0-15): baseado na proporção calórica de in natura/minimamente processado
   const processingMap: Record<string, number> = {
-    in_natura: 15,
-    minimamente_processado: 12,
-    processado: 5,
-    ultraprocessado: 0,
-    indeterminado: 7,
+    'in natura': 15,
+    'minimamente processado': 12,
+    'processado': 5,
+    'ultraprocessado': 0,
   };
   const weightedProcessing = foods.reduce((sum, f) => {
     const weight = (f.calories || 0) / Math.max(totalCalories, 1);
-    return sum + (processingMap[f.processingLevel] || 7) * weight;
+    const raw = f.processingLevel as string;
+    const level = (raw === 'in_natura') ? 'in natura' :
+                  (raw === 'minimamente_processado') ? 'minimamente processado' :
+                  (raw === 'indeterminado' || !raw) ? 'processado' : raw;
+    return sum + (processingMap[level] ?? 5) * weight;
   }, 0);
   const processingScore = Math.round(Math.min(15, weightedProcessing));
 
@@ -167,17 +170,21 @@ export function calculateProcessingBreakdown(foods: FoodItem[]): ProcessingBreak
     minimamenteProcessado: 0,
     processado: 0,
     ultraprocessado: 0,
-    indeterminado: 0,
   };
 
   for (const food of foods) {
     const pct = ((food.calories || 0) / totalCal) * 100;
-    switch (food.processingLevel) {
-      case 'in_natura': levels.inNatura += pct; break;
-      case 'minimamente_processado': levels.minimamenteProcessado += pct; break;
+    const raw = food.processingLevel as string;
+    const level = (raw === 'in_natura') ? 'in natura' :
+                  (raw === 'minimamente_processado') ? 'minimamente processado' :
+                  (raw === 'indeterminado' || !raw) ? 'processado' : raw;
+
+    switch (level) {
+      case 'in natura': levels.inNatura += pct; break;
+      case 'minimamente processado': levels.minimamenteProcessado += pct; break;
       case 'processado': levels.processado += pct; break;
       case 'ultraprocessado': levels.ultraprocessado += pct; break;
-      default: levels.indeterminado += pct;
+      default: levels.processado += pct;
     }
   }
 
@@ -186,7 +193,6 @@ export function calculateProcessingBreakdown(foods: FoodItem[]): ProcessingBreak
     minimamenteProcessado: Math.round(levels.minimamenteProcessado),
     processado: Math.round(levels.processado),
     ultraprocessado: Math.round(levels.ultraprocessado),
-    indeterminado: Math.round(levels.indeterminado),
   };
 }
 
@@ -295,4 +301,59 @@ export function adjustFoodPortion(food: FoodItem, multiplier: number): FoodItem 
     saturatedFat: Math.round((food.saturatedFat || 0) * finalMultiplier * 10) / 10,
     consumedFraction: (food.consumedFraction || 1) * finalMultiplier,
   };
+}
+
+// ────────────────────────────────────────────────────────
+// Índice de Harmonia Diária 360° (Fase 1.3)
+// Combina Flavos Score de nutrição, sono e atividade física
+// ────────────────────────────────────────────────────────
+
+export interface HarmonyScore {
+  score: number;
+  label: string;
+  color: string;
+}
+
+/**
+ * Calcula o Índice de Harmonia Diária cruzando nutrição, sono e passos.
+ *
+ * Pesos calibrados:
+ * - nutritionScore (0-100): contribui com 80% do score base
+ * - sleepHours: fator multiplicador (0.9 a 1.1)
+ * - stepCount: bônus aditivo (máx 10 pts)
+ * Nenhum label usa tom avaliativo ou de julgamento.
+ */
+export function calculateHarmonyScore(
+  nutritionScore: number,
+  sleepHours: number | null,
+  stepCount: number
+): HarmonyScore {
+  let sleepFactor = 1.0;
+  if (sleepHours !== null) {
+    if (sleepHours >= 7 && sleepHours <= 9) sleepFactor = 1.1;
+    else if (sleepHours < 6) sleepFactor = 0.9; // suavizado — sem penalidade severa
+  }
+
+  // Bônus de atividade com teto baixo — não deve "carregar" o score sozinho
+  const activityBonus = Math.min(10, Math.floor(stepCount / 1500));
+
+  // nutritionScore pesa 80%; removido o "+15" fixo que inflava o piso artificialmente
+  const finalScore = Math.min(100, Math.round(
+    nutritionScore * 0.8 * sleepFactor + activityBonus
+  ));
+
+  // Labels neutros — nunca "Atenção Necessária" ou similar
+  const label =
+    finalScore >= 85 ? 'Dia de Alta Performance' :
+    finalScore >= 70 ? 'Bom Equilíbrio' :
+    finalScore >= 50 ? 'Equilíbrio Moderado' :
+    'Dia Mais Leve';
+
+  const color =
+    finalScore >= 85 ? 'text-emerald-400' :
+    finalScore >= 70 ? 'text-blue-400' :
+    finalScore >= 50 ? 'text-yellow-400' :
+    'text-slate-400'; // removido tom laranja/alerta do nível mais baixo
+
+  return { score: finalScore, label, color };
 }

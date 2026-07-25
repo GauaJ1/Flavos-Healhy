@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from '@google/genai';
-
+//analyse.ts
 // Definição do schema idêntico ao do frontend para validação/garantia
 const responseSchema = {
   type: Type.OBJECT,
@@ -98,7 +98,7 @@ const responseSchema = {
           consumedFraction: { type: Type.NUMBER, description: 'Fração consumida. Sempre 1.0 inicialmente (usuário ajusta depois).' },
           healthHighlights: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'Destaques positivos do alimento.' },
           attentionHighlights: { type: Type.ARRAY, items: { type: Type.STRING }, description: 'Pontos de atenção (sem julgamento).' },
-          processingLevel: { type: Type.STRING, description: '"in_natura", "minimamente_processado", "processado", "ultraprocessado" ou "indeterminado".' },
+          processingLevel: { type: Type.STRING, description: '"in natura", "minimamente processado", "processado" ou "ultraprocessado".' },
           possibleAddedSugars: { type: Type.BOOLEAN, description: 'True apenas se houver açúcar ADICIONADO (não natural da fruta).' },
           possibleAddedFats: { type: Type.BOOLEAN, description: 'True apenas se houver gordura ADICIONADA (óleo, manteiga, fritura).' },
           possibleExcessSodium: { type: Type.BOOLEAN, description: 'True se houver risco de sódio elevado.' },
@@ -124,15 +124,26 @@ const responseSchema = {
   required: ['analysisMetadata', 'nutritionalSummary', 'foods', 'hiddenIngredientsPossible', 'feedback', 'suggestions']
 };
 
-function buildPrompt(userContext?: string): string {
-  let prompt = `Você é um especialista em nutrição com foco em alimentação brasileira.
-Analise a imagem enviada e responda SOMENTE com um JSON válido, sem markdown, sem prefácio.
+// systemInstruction separado — contexto persistente que não consome tokens do turno de usuário
+// Conforme documentação Gemini: "system instructions are passed separately from user turns"
+const SYSTEM_INSTRUCTION = `Você é um especialista em nutrição com foco em alimentação brasileira.
+Sua função é analisar imagens de refeições e retornar um JSON nutricional preciso, baseado na Tabela TACO/IBGE.
+Regras fixas que NUNCA mudam:
+- Responda SOMENTE com JSON válido, sem markdown, sem prefácio, sem explicações extras.
+- NUNCA invente alimentos não visíveis nem deduzíveis pela imagem.
+- NUNCA use "faz mal", "proibido", "comida ruim" ou faça diagnósticos médicos.
+- Use SEMPRE dados da Tabela TACO como referência de macros por 100g.
+- Priorize alimentos cozidos/prontos para consumo — nunca use valores de alimento cru se o alimento aparece cozido.`;
 
-## REGRAS OBRIGATÓRIAS
+function buildPrompt(userContext?: string): string {
+  // O system instruction fica fora do prompt do usuário (passa via config.systemInstruction)
+  // Aqui ficam apenas as etapas da tarefa + exemplos few-shot
+  let prompt = `## REGRAS OBRIGATÓRIAS
 
 1. Se a imagem NÃO contiver alimento identificável, retorne isRealFood: false e zere tudo.
 2. Nunca invente alimentos que não são visíveis nem deduzíveis pelo contexto visual.
 3. Se houver dúvida sobre um alimento, use confidence: "baixa" e gere followUpQuestion.
+4. Use SEMPRE a Tabela TACO como referência de macros (valores por 100g, depois escale pelo peso estimado).
 
 ## ETAPA 1 — IDENTIFICAÇÃO
 - Identifique CADA alimento visível: prato principal, acompanhamentos, molhos, farofas, saladas, bebidas, sobremesas, produtos embalados.
@@ -179,6 +190,27 @@ Use referências visuais brasileiras para estimar o peso de cada alimento:
 - 1 lata de refrigerante ≈ 350ml → 140 kcal
 Considere profundidade e empilhamento. Evite falsa precisão — quando houver dúvida, gere follow-up.
 
+## EXEMPLOS FEW-SHOT DE ESTIMATIVA CORRETA
+Use estes exemplos como âncora para calibrar suas estimativas:
+
+Exemplo 1 — Prato de almoço típico (arroz + feijão + frango):
+[
+  {"name":"arroz branco cozido","estimatedWeightGrams":150,"carbohydrates":38.1,"protein":2.5,"fat":0.3,"calories":166},
+  {"name":"feijão carioca cozido","estimatedWeightGrams":140,"carbohydrates":19.6,"protein":7.0,"fat":0.7,"calories":108},
+  {"name":"peito de frango grelhado","estimatedWeightGrams":120,"carbohydrates":0.0,"protein":38.4,"fat":3.0,"calories":183}
+]
+
+Exemplo 2 — Tapioca recheada (SEMPRE decomposta em base + recheio):
+[
+  {"name":"goma de tapioca","estimatedWeightGrams":50,"carbohydrates":30.0,"protein":0.1,"fat":0.0,"calories":121},
+  {"name":"queijo minas frescal","estimatedWeightGrams":30,"carbohydrates":0.5,"protein":4.9,"fat":3.5,"calories":52}
+]
+
+Exemplo 3 — Ovo (valores TACO para ovo cozido, não cru):
+[
+  {"name":"ovo de galinha cozido","estimatedWeightGrams":60,"carbohydrates":0.4,"protein":8.0,"fat":5.7,"calories":83}
+]
+
 ## ETAPA 3 — CÁLCULO POR ALIMENTO (foods[])
 Para CADA alimento:
 - Calcule calories, protein, carbohydrates, fat baseado no peso estimado × valores nutricionais TACO/IBGE.
@@ -188,7 +220,7 @@ Para CADA alimento:
   - Inclua apenas os que tenham >5% da necessidade diária.
 - Considere método de preparo: fritura adiciona ~30% de calorias, grelha mantém, refogado adiciona ~15%.
 - consumedFraction = 1.0 (padrão, o usuário ajusta depois).
-- processingLevel: classificar de "in_natura" a "ultraprocessado".
+- processingLevel: classificar de "in natura" a "ultraprocessado".
 - Marque flags (possibleAddedSugars, possibleAddedFats, etc.) APENAS para adições industriais/artificiais.
 
 ## ETAPA 4 — TOTAIS (nutritionalSummary)
@@ -301,9 +333,14 @@ export default async function handler(req: any, res: any) {
     const ai = new GoogleGenAI({ apiKey });
     
     if (textPrompt) {
+      // Para prompts de texto (relatório, sugestões): modelo leve é suficiente e mais barato
       const response = await ai.models.generateContent({
-        model: 'gemini-3.1-flash-lite',
-        contents: [{ text: textPrompt }]
+        model: 'gemini-3.5-flash-lite',
+        contents: [{ text: textPrompt }],
+        config: {
+          temperature: 0.3,
+          maxOutputTokens: 2048,
+        }
       });
       const textVal = response.text?.trim();
       if (!textVal) {
@@ -316,20 +353,30 @@ export default async function handler(req: any, res: any) {
         return res.status(200).json({ text: textVal });
       }
     } else {
+      // Para análise de imagem: gemini-3.5-flash (geração 3, melhor visão, mais preciso)
+      // systemInstruction é passado fora do contents — reduz tokens por turno e melhora consistência
       const response = await ai.models.generateContent({
-        model: 'gemini-3.1-flash-lite',
+        model: 'gemini-3.5-flash',
         contents: [
           {
-            inlineData: {
-              mimeType: 'image/jpeg',
-              data: imageBase64
-            }
-          },
-          { text: buildPrompt(userContext) }
+            role: 'user',
+            parts: [
+              {
+                inlineData: {
+                  mimeType: 'image/jpeg',
+                  data: imageBase64
+                }
+              },
+              { text: buildPrompt(userContext) }
+            ]
+          }
         ],
         config: {
+          systemInstruction: SYSTEM_INSTRUCTION,
           responseMimeType: 'application/json',
-          responseSchema: responseSchema
+          responseSchema: responseSchema,
+          temperature: 0.2,
+          maxOutputTokens: 8192,   // Previne truncamento em refeições com muitos alimentos
         }
       });
 

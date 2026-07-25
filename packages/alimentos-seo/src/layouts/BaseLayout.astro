@@ -1,0 +1,111 @@
+---
+/**
+ * BaseLayout.astro — Layout SEO-first para páginas de alimentos.
+ *
+ * Implementa: title, description, Open Graph, JSON-LD (NutritionInformation),
+ * canonical URL, hreflang pt-BR, breadcrumbs Schema.org, meta robots.
+ */
+
+interface Props {
+  title: string;
+  description: string;
+  canonicalPath: string;
+  ogImage?: string;
+  jsonLd?: object;
+}
+
+const {
+  title,
+  description,
+  canonicalPath,
+  ogImage = '/og-default.png',
+  jsonLd,
+} = Astro.props;
+
+const SITE = 'https://healthy.flavoscompany.xyz';
+const canonicalURL = `${SITE}${canonicalPath}`;
+const ogImageFull = ogImage.startsWith('http') ? ogImage : `${SITE}${ogImage}`;
+---
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#10b981" />
+
+  <!-- SEO básico -->
+  <title>{title}</title>
+  <meta name="description" content={description} />
+  <link rel="canonical" href={canonicalURL} />
+  <link rel="alternate" hreflang="pt-BR" href={canonicalURL} />
+  <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large" />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="article" />
+  <meta property="og:title" content={title} />
+  <meta property="og:description" content={description} />
+  <meta property="og:url" content={canonicalURL} />
+  <meta property="og:image" content={ogImageFull} />
+  <meta property="og:locale" content="pt_BR" />
+  <meta property="og:site_name" content="Flavos Healthy" />
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content={title} />
+  <meta name="twitter:description" content={description} />
+  <meta name="twitter:image" content={ogImageFull} />
+
+  <!-- JSON-LD -->
+  {jsonLd && (
+    <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
+  )}
+
+  <!-- Fonte -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet"
+  />
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --clr-bg: #0d1117;
+      --clr-surface: #161b22;
+      --clr-border: #21262d;
+      --clr-text: #e6edf3;
+      --clr-muted: #8b949e;
+      --clr-accent: #10b981;
+      --clr-accent-dim: rgba(16, 185, 129, 0.12);
+      --radius: 12px;
+      --max-w: 720px;
+      font-family: 'Inter', system-ui, sans-serif;
+    }
+    html { background: var(--clr-bg); color: var(--clr-text); }
+    body { min-height: 100vh; }
+    a { color: var(--clr-accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <!-- Site Nav -->
+  <header style="border-bottom:1px solid var(--clr-border);padding:16px 24px;display:flex;align-items:center;justify-content:space-between;max-width:var(--max-w);margin:0 auto;">
+    <a href="https://healthy.flavoscompany.xyz" style="display:flex;align-items:center;gap:8px;font-weight:800;color:var(--clr-accent);font-size:15px;">
+      🥦 Flavos Healthy
+    </a>
+    <a href="/alimentos" style="font-size:13px;color:var(--clr-muted);">← Todos os alimentos</a>
+  </header>
+
+  <main style="max-width:var(--max-w);margin:0 auto;padding:32px 24px 64px;">
+    <slot />
+  </main>
+
+  <footer style="border-top:1px solid var(--clr-border);padding:24px;text-align:center;font-size:12px;color:var(--clr-muted);">
+    Dados nutricionais baseados na Tabela Brasileira de Composição de Alimentos (TACO/NEPA-UNICAMP, 4ª edição).
+    <br />
+    © 2024 Flavos Healthy — Não substitui orientação nutricional profissional.
+  </footer>
+</body>
+</html>

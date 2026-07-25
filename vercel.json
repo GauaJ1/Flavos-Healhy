@@ -5,7 +5,11 @@
       "destination": "/api/$1"
     },
     {
-      "source": "/((?!api/).*)",
+      "source": "/alimentos/:path*",
+      "destination": "/alimentos/:path*"
+    },
+    {
+      "source": "/((?!api/|alimentos/).*)",
       "destination": "/index.html"
     }
   ],
@@ -17,6 +21,19 @@
         { "key": "Access-Control-Allow-Methods", "value": "POST, OPTIONS" },
         { "key": "Access-Control-Allow-Headers", "value": "Content-Type, Accept, Content-Length" },
         { "key": "Access-Control-Max-Age",        "value": "86400" }
+      ]
+    },
+    {
+      "source": "/alimentos/(.*)\\.html",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=3600, stale-while-revalidate=86400" },
+        { "key": "X-Robots-Tag", "value": "index, follow" }
+      ]
+    },
+    {
+      "source": "/alimentos",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=3600, stale-while-revalidate=86400" }
       ]
     },
     {
@@ -33,4 +50,4 @@
       ]
     }
   ]
-}
+}

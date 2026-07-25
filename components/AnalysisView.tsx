@@ -832,11 +832,12 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
                   };
 
                   const processingLabels = {
+                    'in natura': 'In Natura',
                     'in_natura': 'In Natura',
+                    'minimamente processado': 'Minimamente Processado',
                     'minimamente_processado': 'Minimamente Processado',
                     'processado': 'Processado',
                     'ultraprocessado': 'Ultraprocessado',
-                    'indeterminado': 'Indeterminado'
                   };
 
                   return (

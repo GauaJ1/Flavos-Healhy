@@ -5,11 +5,17 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import androidx.health.connect.client.permission.HealthPermission
+import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.HydrationRecord
 import androidx.health.connect.client.records.MealType
 import androidx.health.connect.client.records.NutritionRecord
+import androidx.health.connect.client.records.SleepSessionRecord
+import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.records.WeightRecord
 import androidx.health.connect.client.records.metadata.Metadata
+import androidx.health.connect.client.request.AggregateRequest
+import androidx.health.connect.client.request.ReadRecordsRequest
+import androidx.health.connect.client.time.TimeRangeFilter
 import androidx.health.connect.client.units.Energy
 import androidx.health.connect.client.units.Mass
 import androidx.health.connect.client.units.Volume
@@ -22,8 +28,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.ZoneId
 import java.time.ZoneOffset
+import java.time.temporal.ChronoUnit
 
 /**
  * Plugin Capacitor nativo para sincronização com Health Connect.
@@ -67,6 +79,9 @@ class HealthSyncPlugin : Plugin() {
         HealthPermission.getWritePermission(WeightRecord::class),
         HealthPermission.getReadPermission(NutritionRecord::class),
         HealthPermission.getReadPermission(WeightRecord::class),
+        HealthPermission.getReadPermission(SleepSessionRecord::class),
+        HealthPermission.getReadPermission(ExerciseSessionRecord::class),
+        HealthPermission.getReadPermission(StepsRecord::class),
     )
 
     override fun load() {
@@ -538,6 +553,120 @@ class HealthSyncPlugin : Plugin() {
             in 15..17 -> MEAL_TYPE_SNACK
             in 18..21 -> MEAL_TYPE_DINNER
             else -> MEAL_TYPE_SNACK
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // Leitura Saúde 360° — Sono
+    // ──────────────────────────────────────────────────────────────
+
+    /**
+     * Lê a sessão de sono principal das últimas 24h.
+     * "Principal" = sessão de MAIOR duração (evita capturar soneca em vez do sono noturno).
+     * Sessões < 3 horas são descartadas (filtro de soneca).
+     */
+    @PluginMethod
+    fun readSleepData(call: PluginCall) {
+        val ctx = context ?: run { call.reject("Contexto não disponível"); return }
+        val client = HealthConnectClient.getOrCreate(ctx)
+        val endTime = Instant.now()
+        val startTime = endTime.minus(24, ChronoUnit.HOURS)
+
+        scope.launch {
+            try {
+                val response = client.readRecords(
+                    ReadRecordsRequest(
+                        recordType = SleepSessionRecord::class,
+                        timeRangeFilter = TimeRangeFilter.between(startTime, endTime)
+                    )
+                )
+
+                // Sessão principal = a de maior duração na janela
+                val mainSession = response.records.maxByOrNull {
+                    Duration.between(it.startTime, it.endTime).toMinutes()
+                }
+
+                val result = JSObject()
+                if (mainSession != null) {
+                    val durationMinutes = Duration.between(mainSession.startTime, mainSession.endTime).toMinutes()
+                    // Filtro adicional: ignorar sessões < 3h (soneca, não sono principal)
+                    if (durationMinutes >= 180) {
+                        result.put("hasData", true)
+                        result.put("durationMinutes", durationMinutes)
+                        result.put("startTime", mainSession.startTime.toString())
+                        result.put("endTime", mainSession.endTime.toString())
+                    } else {
+                        result.put("hasData", false)
+                        result.put("reason", "Sessão mais longa detectada (${durationMinutes}min) é menor que 3h — provavelmente soneca")
+                    }
+                } else {
+                    result.put("hasData", false)
+                    result.put("reason", "Nenhuma sessão de sono encontrada nas últimas 24h")
+                }
+
+                Log.d(TAG, "ℹ️ readSleepData: hasData=${result.getBoolean("hasData")}")
+                call.resolve(result)
+            } catch (e: SecurityException) {
+                call.reject("Sem permissão de leitura de sono", "PERMISSION_DENIED")
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Erro ao ler dados de sono", e)
+                call.reject("Erro ao ler dados de sono: ${e.message}")
+            }
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // Leitura Saúde 360° — Atividade Física (Passos + Exercício)
+    // ──────────────────────────────────────────────────────────────
+
+    /**
+     * Lê a contagem de passos e a sessão de exercício do dia atual.
+     *
+     * Passos: usa AggregateRequest (agrega/deduplica automaticamente múltiplos fontes
+     * como relógio + celular) — NUNCA somar manualmente os records de passos.
+     * Exercício: retorna a última sessão de exercício do dia.
+     */
+    @PluginMethod
+    fun readActivityData(call: PluginCall) {
+        val ctx = context ?: run { call.reject("Contexto não disponível"); return }
+        val client = HealthConnectClient.getOrCreate(ctx)
+        val now = Instant.now()
+        val startOfDay = LocalDateTime.of(LocalDate.now(), LocalTime.MIDNIGHT)
+            .atZone(ZoneId.systemDefault()).toInstant()
+
+        scope.launch {
+            try {
+                // Agrega passos usando API oficial (deduplica fontes automaticamente)
+                val aggregateRequest = AggregateRequest(
+                    metrics = setOf(StepsRecord.COUNT_TOTAL),
+                    timeRangeFilter = TimeRangeFilter.between(startOfDay, now)
+                )
+                val aggregateResponse = client.aggregate(aggregateRequest)
+                val totalSteps = aggregateResponse[StepsRecord.COUNT_TOTAL] ?: 0L
+
+                // Lê sessões de exercício do dia
+                val exerciseResponse = client.readRecords(
+                    ReadRecordsRequest(
+                        recordType = ExerciseSessionRecord::class,
+                        timeRangeFilter = TimeRangeFilter.between(startOfDay, now)
+                    )
+                )
+                val lastWorkout = exerciseResponse.records.lastOrNull()
+
+                val result = JSObject()
+                result.put("steps", totalSteps)
+                result.put("hasWorkout", lastWorkout != null)
+                result.put("workoutTitle", lastWorkout?.title ?: "")
+                result.put("workoutType", lastWorkout?.exerciseType?.toString() ?: "")
+
+                Log.d(TAG, "ℹ️ readActivityData: steps=$totalSteps, hasWorkout=${lastWorkout != null}")
+                call.resolve(result)
+            } catch (e: SecurityException) {
+                call.reject("Sem permissão de leitura de atividade", "PERMISSION_DENIED")
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Erro ao ler dados de atividade", e)
+                call.reject("Erro ao ler dados de atividade: ${e.message}")
+            }
         }
     }
 }

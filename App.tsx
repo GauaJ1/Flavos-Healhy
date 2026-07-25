@@ -14,6 +14,10 @@ import HealthSyncToggle from './components/HealthSyncToggle';
 import DashboardView from './components/DashboardView';
 import HistoryView from './components/HistoryView';
 import CameraView from './components/CameraView';
+import { BarcodeScannerModal } from './components/BarcodeScannerModal';
+import { MealComparatorModal } from './components/MealComparatorModal';
+import { exportHistoryToCSV } from './services/pdfExportService';
+import { fetchProductByBarcode } from './services/barcodeService';
 import { AnimatePresence, motion } from 'framer-motion';
 import { compressImage } from './utils/imageCompression';
 import { useWeeklyCycleReminder } from './hooks/useWeeklyCycleReminder';
@@ -62,6 +66,8 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [showTutorial, setShowTutorial] = useState<boolean>(false);
   const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
+  const [showBarcodeScanner, setShowBarcodeScanner] = useState<boolean>(false);
+  const [showComparator, setShowComparator] = useState<boolean>(false);
   const [view, setView] = useState<View>('upload');
   const [activeTab, setActiveTab] = useState<Tab>('upload');
 
@@ -69,6 +75,35 @@ const App: React.FC = () => {
   const healthSync = useHealthSync();
   const { profile, targets, hasProfile, updateProfile } = useUserProfile();
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const handleBarcodeDetected = async (barcode: string) => {
+    setIsLoading(true);
+    setShowBarcodeScanner(false);
+    try {
+      const res = await fetchProductByBarcode(barcode);
+      if (res.found && res.product) {
+        const result: AnalysisResult = {
+          foods: [res.product],
+          totalCalories: res.product.calories,
+          advice: `Produto identificado via Código de Barras (${barcode}).`,
+          harmonyScore: res.product.processingLevel === 'ultraprocessado' ? 45 : 85,
+          inflammatoryClassification: res.product.processingLevel === 'ultraprocessado' ? 'Moderadamente Inflamatório' : 'Anti-inflamatório'
+        };
+        setAnalysisResult(result);
+        setView('analysis');
+      } else {
+        setError(res.errorMessage || `Produto (${barcode}) não encontrado no banco de dados.`);
+      }
+    } catch (err: any) {
+      setError('Erro ao processar código de barras.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleExportPdf = () => {
+    exportHistoryToCSV(history);
+  };
 
   // Instanciar hooks de metabolismo, ciclo de carboidratos e lembretes
   const weeklyReminder = useWeeklyCycleReminder();
@@ -317,6 +352,7 @@ const App: React.FC = () => {
               onOpenProfile={() => setShowOnboarding(true)}
               weeklyReminder={weeklyReminder}
               onNavigateToReminderFlow={() => setView('carbCycleReminder')}
+              onExportPdf={handleExportPdf}
             />
           </motion.div>
         );
@@ -355,7 +391,12 @@ const App: React.FC = () => {
         return (
           <motion.div key="history" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 20 }} className="w-full flex justify-center">
-            <HistoryView history={history} onDeleteEntry={removeHistoryEntry} />
+            <HistoryView
+              history={history}
+              onDeleteEntry={removeHistoryEntry}
+              onExportPdf={handleExportPdf}
+              onOpenComparator={() => setShowComparator(true)}
+            />
           </motion.div>
         );
 
@@ -378,7 +419,11 @@ const App: React.FC = () => {
               onDisable={healthSync.disableSync}
               onClearMessages={healthSync.clearMessages}
             />
-            <ImageUploader onImageSelected={handleImageSelected} onTakePhoto={() => setView('camera')} />
+            <ImageUploader
+              onImageSelected={handleImageSelected}
+              onTakePhoto={() => setView('camera')}
+              onOpenBarcodeScanner={() => setShowBarcodeScanner(true)}
+            />
           </motion.div>
         );
     }
@@ -450,6 +495,20 @@ const App: React.FC = () => {
             setShowOnboarding(false);
           }}
           onSkip={() => setShowOnboarding(false)}
+        />
+      )}
+      {showBarcodeScanner && (
+        <BarcodeScannerModal
+          isOpen={showBarcodeScanner}
+          onClose={() => setShowBarcodeScanner(false)}
+          onBarcodeDetected={handleBarcodeDetected}
+        />
+      )}
+      {showComparator && (
+        <MealComparatorModal
+          history={history}
+          isOpen={showComparator}
+          onClose={() => setShowComparator(false)}
         />
       )}
 

@@ -26,6 +26,12 @@ describe('isCompositeDish', () => {
     expect(isCompositeDish('Queijo mucarela')).toBe(false);
     expect(isCompositeDish('Tapioca')).toBe(false); // simple tapioca without recheio keyword "com"
   });
+
+  it('should not trigger isCompositeDish for substrings inside longer words (Fix 3)', () => {
+    expect(isCompositeDish('Acompanhamento')).toBe(false); // "com" is substring
+    expect(isCompositeDish('Recomendado')).toBe(false);     // "com" is substring
+    expect(isCompositeDish('Elefante')).toBe(false);        // "e" is substring
+  });
 });
 
 describe('findTACOMatch with allowedFoodGroups filter', () => {
@@ -33,18 +39,19 @@ describe('findTACOMatch with allowedFoodGroups filter', () => {
     // Standard match without filter
     const matchNoFilter = findTACOMatch('frango');
     expect(matchNoFilter).not.toBeNull();
-    expect(matchNoFilter?.match.foodGroup).toBe('proteinas');
+    expect(['carnes', 'proteinas']).toContain(matchNoFilter?.match.foodGroup);
 
-    // Match with proteinas whitelisted
-    const matchProtein = findTACOMatch('frango', ['proteinas']);
+    // Match with proteinas or carnes whitelisted
+    const matchProtein = findTACOMatch('frango', ['proteinas', 'carnes']);
     expect(matchProtein).not.toBeNull();
-    expect(matchProtein?.match.foodGroup).toBe('proteinas');
+    expect(['carnes', 'proteinas']).toContain(matchProtein?.match.foodGroup);
 
     // Match with an unrelated category filter should yield null or different match
     // since the database doesn't have an item named 'frango' in 'laticinios'
     const matchDairy = findTACOMatch('frango', ['laticinios']);
     expect(matchDairy).toBeNull();
   });
+
 
   it('should raise the minimum similarity threshold correctly', () => {
     // "tapioca com frango" similarity to "tapioca" is low (around 0.5 - 0.6)

@@ -7,7 +7,6 @@ const levelConfig = {
   minimamenteProcessado: { label: 'Min. Processado', color: '#3b82f6', icon: '🍳' },
   processado: { label: 'Processado', color: '#f59e0b', icon: '🏭' },
   ultraprocessado: { label: 'Ultraprocessado', color: '#ef4444', icon: '⚠️' },
-  indeterminado: { label: 'Indeterminado', color: '#6b7280', icon: '❓' },
 };
 
 const ProcessingBreakdown: React.FC<{ breakdown: PBType }> = ({ breakdown }) => {
@@ -16,7 +15,6 @@ const ProcessingBreakdown: React.FC<{ breakdown: PBType }> = ({ breakdown }) => 
     { key: 'minimamenteProcessado', pct: breakdown.minimamenteProcessado },
     { key: 'processado', pct: breakdown.processado },
     { key: 'ultraprocessado', pct: breakdown.ultraprocessado },
-    { key: 'indeterminado', pct: breakdown.indeterminado },
   ].filter(i => i.pct > 0);
 
   const hasUltraWarning = breakdown.ultraprocessado > 50;

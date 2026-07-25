@@ -17,9 +17,11 @@ import { isNativePlatform } from '../services/healthSyncService';
 interface HistoryViewProps {
   history: HistoryEntry[];
   onDeleteEntry: (id: number) => void;
+  onExportPdf?: () => void;
+  onOpenComparator?: () => void;
 }
 
-const HistoryView: React.FC<HistoryViewProps> = ({ history, onDeleteEntry }) => {
+const HistoryView: React.FC<HistoryViewProps> = ({ history, onDeleteEntry, onExportPdf, onOpenComparator }) => {
   const chartData = useMemo(() => {
     const dailyTotals: { [key: string]: number } = {};
     // Initialize last 7 days with 0
@@ -80,6 +82,29 @@ const HistoryView: React.FC<HistoryViewProps> = ({ history, onDeleteEntry }) => 
 
   return (
     <div className="w-full max-w-4xl space-y-8 pb-20">
+        {/* Quick Action Bar for PDF & Comparator */}
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-800/40 p-4 rounded-2xl border border-gray-700/50">
+          <span className="text-sm font-semibold text-gray-300">Ferramentas de Relatório</span>
+          <div className="flex items-center gap-2">
+            {onOpenComparator && (
+              <button
+                onClick={onOpenComparator}
+                className="flex items-center gap-2 bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 text-xs font-semibold py-2 px-3 rounded-xl transition-all"
+              >
+                ⚖️ Comparar Refeições
+              </button>
+            )}
+            {onExportPdf && (
+              <button
+                onClick={onExportPdf}
+                className="flex items-center gap-2 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 text-xs font-semibold py-2 px-3 rounded-xl transition-all"
+              >
+                📄 Exportar PDF
+              </button>
+            )}
+          </div>
+        </div>
+
         {/* Chart Section */}
         <motion.div 
             initial={{ y: 20, opacity: 0 }}

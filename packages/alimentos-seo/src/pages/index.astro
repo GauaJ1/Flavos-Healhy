@@ -1,0 +1,112 @@
+---
+/**
+ * index.astro — Listagem de todos os alimentos
+ * URL: healthy.flavoscompany.xyz/alimentos
+ * Base: TACO 4ª Ed. (NEPA-UNICAMP) + IBGE-POF (2.516 alimentos)
+ */
+import BaseLayout from '../layouts/BaseLayout.astro';
+import tacoData from '../data/taco-reference.json';
+
+// Mapa de grupos com labels e emojis amigáveis
+const groups: Record<string, { label: string; emoji: string }> = {
+  cereais:            { label: 'Cereais e Grãos',           emoji: '🌾' },
+  leguminosas:        { label: 'Leguminosas',                emoji: '🫘' },
+  proteinas:          { label: 'Proteínas',                  emoji: '🍗' },
+  carnes:             { label: 'Carnes e Derivados',         emoji: '🥩' },
+  pescados:           { label: 'Pescados e Frutos do Mar',   emoji: '🐟' },
+  ovos:               { label: 'Ovos',                       emoji: '🥚' },
+  gorduras:           { label: 'Gorduras e Óleos',           emoji: '🫒' },
+  gorduras_oleos:     { label: 'Gorduras e Óleos',           emoji: '🫒' },
+  frutas:             { label: 'Frutas',                     emoji: '🍎' },
+  vegetais:           { label: 'Vegetais e Verduras',        emoji: '🥦' },
+  verduras_hortalicas:{ label: 'Verduras e Hortaliças',      emoji: '🥦' },
+  laticinios:         { label: 'Laticínios',                 emoji: '🥛' },
+  bebidas:            { label: 'Bebidas',                    emoji: '🧃' },
+  nozes_sementes:     { label: 'Nozes e Sementes',           emoji: '🌰' },
+  doces:              { label: 'Doces e Açúcares',           emoji: '🍬' },
+  miscelaneas:        { label: 'Miscelâneas',                emoji: '🧂' },
+  industrializados:   { label: 'Industrializados',           emoji: '🏭' },
+  preparados:         { label: 'Pratos Preparados',          emoji: '🍲' },
+  ultra:              { label: 'Ultraprocessados',           emoji: '⚠️' },
+  ultraprocessados:   { label: 'Ultraprocessados',           emoji: '⚠️' },
+  outros:             { label: 'Outros',                     emoji: '🍽️' },
+};
+
+const totalItems = tacoData.length;
+const tacoCount = tacoData.filter((i: any) => !i.source || i.source === 'TACO').length;
+const ibgeCount = tacoData.filter((i: any) => i.source === 'IBGE-POF').length;
+
+const grouped = Object.groupBy(tacoData, (item: any) => item.foodGroup);
+
+const TITLE = `Tabela Nutricional de ${totalItems.toLocaleString('pt-BR')} Alimentos Brasileiros | Flavos Healthy`;
+const DESC = `Consulte valores nutricionais completos de ${totalItems.toLocaleString('pt-BR')} alimentos com base na TACO/NEPA-UNICAMP (4ª ed.) e IBGE-POF. Calorias, proteínas, carboidratos, fibras, vitaminas e minerais por 100g.`;
+
+const breadcrumbLd = {
+  '@context': 'https://schema.org',
+  '@type': 'BreadcrumbList',
+  itemListElement: [
+    { '@type': 'ListItem', position: 1, name: 'Início', item: 'https://healthy.flavoscompany.xyz' },
+    { '@type': 'ListItem', position: 2, name: 'Alimentos', item: 'https://healthy.flavoscompany.xyz/alimentos' },
+  ],
+};
+---
+
+<BaseLayout title={TITLE} description={DESC} canonicalPath="/alimentos" jsonLd={breadcrumbLd}>
+  <!-- Breadcrumb -->
+  <nav aria-label="Navegação estrutural" style="font-size:13px;color:var(--clr-muted);margin-bottom:24px;">
+    <a href="https://healthy.flavoscompany.xyz">Início</a>
+    <span style="margin:0 6px;">›</span>
+    <span>Alimentos</span>
+  </nav>
+
+  <h1 style="font-size:clamp(22px,5vw,32px);font-weight:800;line-height:1.2;margin-bottom:12px;">
+    Tabela Nutricional de Alimentos
+  </h1>
+  <p style="color:var(--clr-muted);font-size:15px;line-height:1.6;margin-bottom:16px;max-width:640px;">
+    Valores por 100g, baseados na <strong style="color:var(--clr-text)">TACO/NEPA-UNICAMP (4ª edição)</strong> e
+    <strong style="color:var(--clr-text)">IBGE-POF</strong>.
+    Clique em qualquer alimento para ver a ficha nutricional completa.
+  </p>
+
+  <!-- Contador de cobertura -->
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:36px;">
+    <div style="display:inline-flex;align-items:center;gap:6px;background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.25);border-radius:24px;padding:6px 14px;">
+      <span style="font-size:13px;font-weight:700;color:#10b981;">{totalItems.toLocaleString('pt-BR')} alimentos</span>
+    </div>
+    <div style="display:inline-flex;align-items:center;gap:6px;background:var(--clr-surface);border:1px solid var(--clr-border);border-radius:24px;padding:6px 14px;">
+      <span style="font-size:12px;color:var(--clr-muted);">TACO: <strong style="color:var(--clr-text)">{tacoCount}</strong></span>
+    </div>
+    <div style="display:inline-flex;align-items:center;gap:6px;background:rgba(96,165,250,.08);border:1px solid rgba(96,165,250,.2);border-radius:24px;padding:6px 14px;">
+      <span style="font-size:12px;color:var(--clr-muted);">IBGE-POF: <strong style="color:#60a5fa">{ibgeCount}</strong></span>
+    </div>
+  </div>
+
+  <!-- Grupos alimentares -->
+  {Object.entries(grouped).map(([groupKey, items]) => {
+    const group = groups[groupKey] ?? { label: groupKey.replace(/_/g, ' '), emoji: '🍽️' };
+    return (
+      <section style="margin-bottom:36px;">
+        <h2 style="font-size:15px;font-weight:700;color:var(--clr-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px;display:flex;align-items:center;gap:8px;">
+          <span>{group.emoji}</span> {group.label}
+          <span style="font-weight:400;font-size:12px;background:var(--clr-accent-dim);color:var(--clr-accent);border-radius:20px;padding:2px 8px;margin-left:4px;">{items!.length}</span>
+        </h2>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;">
+          {items!.map((item: any) => (
+            <a
+              href={`/alimentos/${item.slug}`}
+              style="display:block;background:var(--clr-surface);border:1px solid var(--clr-border);border-radius:var(--radius);padding:14px 16px;transition:border-color .15s,transform .15s;text-decoration:none;"
+              onmouseover="this.style.borderColor='var(--clr-accent)';this.style.transform='translateY(-2px)'"
+              onmouseout="this.style.borderColor='var(--clr-border)';this.style.transform='none'"
+            >
+              {item.source === 'IBGE-POF' && (
+                <span style="font-size:9px;font-weight:700;color:#60a5fa;background:rgba(96,165,250,.12);border-radius:4px;padding:1px 5px;margin-bottom:4px;display:inline-block;letter-spacing:.03em;">IBGE</span>
+              )}
+              <p style="font-size:13px;font-weight:600;color:var(--clr-text);text-transform:capitalize;margin-bottom:4px;">{item.name}</p>
+              <p style="font-size:11px;color:var(--clr-muted);">{item.calories} kcal · {item.protein}g prot · {item.carbohydrates}g carb</p>
+            </a>
+          ))}
+        </div>
+      </section>
+    );
+  })}
+</BaseLayout>

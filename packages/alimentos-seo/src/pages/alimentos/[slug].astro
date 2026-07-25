@@ -1,0 +1,316 @@
+---
+/**
+ * [slug].astro — Ficha nutricional individual de alimento
+ * URL: healthy.flavoscompany.xyz/alimentos/[slug]
+ * Base: TACO 4ª Ed. (NEPA-UNICAMP) + IBGE POF (2.516 alimentos)
+ */
+
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import tacoData from '../../data/taco-reference.json';
+
+export async function getStaticPaths() {
+  return tacoData.map((item) => ({
+    params: { slug: item.slug },
+    props: { item },
+  }));
+}
+
+const { item } = Astro.props;
+
+const displayName = item.name.charAt(0).toUpperCase() + item.name.slice(1);
+const sourceLabel = item.source === 'IBGE-POF'
+  ? 'IBGE-POF (Pesquisa de Orçamentos Familiares)'
+  : 'TACO/NEPA-UNICAMP (4ª ed.)';
+
+const title = `${displayName}: Tabela Nutricional por 100g | Flavos Healthy`;
+const description = `${displayName} tem ${item.calories} kcal, ${item.protein}g de proteína, ${item.carbohydrates}g de carboidrato e ${item.fat}g de gordura por 100g. Tabela completa de ${item.fiber}g de fibra, ${item.sodium}mg de sódio, ${item.calcium_mg}mg de cálcio. Fonte: ${sourceLabel}.`;
+const canonicalPath = `/alimentos/${item.slug}`;
+
+const jsonLd = [
+  {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: 'Início', item: 'https://healthy.flavoscompany.xyz' },
+      { '@type': 'ListItem', position: 2, name: 'Alimentos', item: 'https://healthy.flavoscompany.xyz/alimentos' },
+      { '@type': 'ListItem', position: 3, name: displayName, item: `https://healthy.flavoscompany.xyz/alimentos/${item.slug}` },
+    ],
+  },
+  {
+    '@context': 'https://schema.org',
+    '@type': 'NutritionInformation',
+    name: displayName,
+    servingSize: '100g',
+    calories: `${item.calories} kcal`,
+    carbohydrateContent: `${item.carbohydrates} g`,
+    proteinContent: `${item.protein} g`,
+    fatContent: `${item.fat} g`,
+    fiberContent: `${item.fiber} g`,
+    sugarContent: `${item.sugar} g`,
+    sodiumContent: `${item.sodium} mg`,
+    saturatedFatContent: `${item.saturatedFat} g`,
+    cholesterolContent: item.sodium > 0 ? `${item.sodium} mg` : '0 mg',
+  },
+  {
+    '@context': 'https://schema.org',
+    '@type': 'WebPage',
+    name: title,
+    description: description,
+    url: `https://healthy.flavoscompany.xyz/alimentos/${item.slug}`,
+    inLanguage: 'pt-BR',
+    publisher: {
+      '@type': 'Organization',
+      name: 'Flavos Healthy',
+      url: 'https://healthy.flavoscompany.xyz',
+    },
+  },
+];
+
+const scoreColor =
+  !item.antiInflammatoryScore ? 'var(--clr-muted)' :
+  item.antiInflammatoryScore >= 7 ? '#10b981' :
+  item.antiInflammatoryScore >= 4 ? '#f59e0b' :
+  '#f87171';
+
+const giLabel =
+  !item.glycemicIndex || item.glycemicIndex === 0 ? 'N/A' :
+  item.glycemicIndex < 55 ? 'Baixo' :
+  item.glycemicIndex < 70 ? 'Médio' :
+  'Alto';
+const giColor =
+  !item.glycemicIndex || item.glycemicIndex === 0 ? 'var(--clr-muted)' :
+  item.glycemicIndex < 55 ? '#10b981' :
+  item.glycemicIndex < 70 ? '#f59e0b' :
+  '#f87171';
+
+// Build group readable label
+const foodGroupLabel: Record<string, string> = {
+  cereais: 'Cereais e Derivados',
+  verduras_hortalicas: 'Verduras e Hortaliças',
+  frutas: 'Frutas',
+  gorduras_oleos: 'Gorduras e Óleos',
+  pescados: 'Pescados e Frutos do Mar',
+  carnes: 'Carnes e Derivados',
+  laticinios: 'Leite e Derivados',
+  bebidas: 'Bebidas',
+  ovos: 'Ovos',
+  doces: 'Doces e Açúcares',
+  miscelaneas: 'Miscelâneas',
+  industrializados: 'Industrializados',
+  preparados: 'Pratos Preparados',
+  leguminosas: 'Leguminosas',
+  nozes_sementes: 'Nozes e Sementes',
+  outros: 'Outros',
+};
+const groupLabel = foodGroupLabel[item.foodGroup] ?? item.foodGroup;
+---
+
+<BaseLayout title={title} description={description} canonicalPath={canonicalPath} jsonLd={jsonLd}>
+  <!-- Breadcrumb -->
+  <nav aria-label="Navegação estrutural" style="font-size:13px;color:var(--clr-muted);margin-bottom:28px;">
+    <a href="https://healthy.flavoscompany.xyz">Início</a>
+    <span style="margin:0 6px;">›</span>
+    <a href="/alimentos">Alimentos</a>
+    <span style="margin:0 6px;">›</span>
+    <span style="color:var(--clr-text);text-transform:capitalize;">{item.name}</span>
+  </nav>
+
+  <!-- Cabeçalho -->
+  <div style="margin-bottom:32px;">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+      <div style="display:inline-flex;align-items:center;gap:8px;background:var(--clr-accent-dim);border:1px solid rgba(16,185,129,.2);border-radius:20px;padding:4px 12px;">
+        <span style="font-size:11px;font-weight:700;color:var(--clr-accent);text-transform:uppercase;letter-spacing:.06em;">{groupLabel}</span>
+      </div>
+      {item.source === 'IBGE-POF' && (
+        <div style="display:inline-flex;align-items:center;gap:6px;background:rgba(96,165,250,.1);border:1px solid rgba(96,165,250,.25);border-radius:20px;padding:4px 12px;">
+          <span style="font-size:11px;font-weight:600;color:#60a5fa;">IBGE-POF</span>
+        </div>
+      )}
+    </div>
+    <h1 style="font-size:clamp(24px,5vw,36px);font-weight:800;line-height:1.2;text-transform:capitalize;margin-bottom:10px;">{item.name}</h1>
+    <p style="color:var(--clr-muted);font-size:14px;line-height:1.6;">
+      Valores nutricionais por <strong style="color:var(--clr-text)">100g</strong>,
+      fonte: <abbr title={sourceLabel}>{item.source === 'IBGE-POF' ? 'IBGE-POF' : 'TACO/NEPA-UNICAMP (4ª ed.)'}</abbr>.
+    </p>
+  </div>
+
+  <!-- Cards de macros principais -->
+  <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:28px;" role="region" aria-label="Macronutrientes principais">
+    {[
+      { label: 'Calorias', value: `${item.calories}`, unit: 'kcal', color: '#f87171' },
+      { label: 'Proteína', value: `${item.protein}`, unit: 'g', color: '#93c5fd' },
+      { label: 'Carboidratos', value: `${item.carbohydrates}`, unit: 'g', color: '#6ee7b7' },
+      { label: 'Gordura Total', value: `${item.fat}`, unit: 'g', color: '#fde68a' },
+    ].map(m => (
+      <div style="background:var(--clr-surface);border:1px solid var(--clr-border);border-radius:var(--radius);padding:16px 18px;">
+        <p style="font-size:11px;font-weight:700;color:var(--clr-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;">{m.label}</p>
+        <p>
+          <span style={`font-size:26px;font-weight:800;color:${m.color};`}>{m.value}</span>
+          <span style="font-size:12px;color:var(--clr-muted);margin-left:3px;">{m.unit}</span>
+        </p>
+      </div>
+    ))}
+  </div>
+
+  <!-- Tabela Nutricional Completa -->
+  <section style="margin-bottom:28px;">
+    <h2 style="font-size:14px;font-weight:700;color:var(--clr-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px;">
+      Composição Nutricional Completa
+    </h2>
+    <div style="background:var(--clr-surface);border:1px solid var(--clr-border);border-radius:var(--radius);overflow:hidden;">
+      <table style="width:100%;border-collapse:collapse;font-size:14px;" role="table" aria-label={`Tabela nutricional de ${item.name} por 100g`}>
+        <thead>
+          <tr style="border-bottom:2px solid var(--clr-border);">
+            <th scope="col" style="text-align:left;padding:12px 16px;font-size:11px;font-weight:700;color:var(--clr-muted);text-transform:uppercase;letter-spacing:.06em;">Nutriente</th>
+            <th scope="col" style="text-align:right;padding:12px 16px;font-size:11px;font-weight:700;color:var(--clr-muted);text-transform:uppercase;letter-spacing:.06em;">Por 100g</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- ENERGIA -->
+          <tr style="border-bottom:1px solid var(--clr-border);background:rgba(248,113,113,.04);">
+            <td colspan="2" style="padding:7px 16px;font-size:11px;font-weight:700;color:#f87171;text-transform:uppercase;letter-spacing:.05em;">⚡ Energia</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--clr-border);">
+            <td style="padding:11px 16px 11px 24px;color:var(--clr-text);">Valor Energético</td>
+            <td style="padding:11px 16px;text-align:right;font-weight:700;color:#f87171;">{item.calories} <span style="font-size:11px;font-weight:400;color:var(--clr-muted);">kcal</span></td>
+          </tr>
+
+          <!-- MACRONUTRIENTES -->
+          <tr style="border-bottom:1px solid var(--clr-border);background:rgba(110,231,183,.04);">
+            <td colspan="2" style="padding:7px 16px;font-size:11px;font-weight:700;color:#6ee7b7;text-transform:uppercase;letter-spacing:.05em;">🌾 Carboidratos</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--clr-border);">
+            <td style="padding:11px 16px 11px 24px;color:var(--clr-text);">Carboidratos Totais</td>
+            <td style="padding:11px 16px;text-align:right;font-weight:600;color:var(--clr-text);">{item.carbohydrates} <span style="font-size:11px;font-weight:400;color:var(--clr-muted);">g</span></td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--clr-border);background:rgba(255,255,255,.02);">
+            <td style="padding:10px 16px 10px 36px;color:var(--clr-muted);font-size:13px;">↳ Açúcares Totais</td>
+            <td style="padding:10px 16px;text-align:right;color:var(--clr-muted);font-size:13px;">{item.sugar ?? '—'} <span style="font-size:11px;">g</span></td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--clr-border);">
+            <td style="padding:10px 16px 10px 36px;color:var(--clr-muted);font-size:13px;">↳ Açúcares Adicionados</td>
+            <td style="padding:10px 16px;text-align:right;color:var(--clr-muted);font-size:13px;">{item.addedSugar ?? '—'} <span style="font-size:11px;">g</span></td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--clr-border);background:rgba(255,255,255,.02);">
+            <td style="padding:10px 16px 10px 36px;color:var(--clr-muted);font-size:13px;">↳ Fibras Alimentares</td>
+            <td style="padding:10px 16px;text-align:right;font-weight:600;color:#10b981;font-size:13px;">{item.fiber} <span style="font-size:11px;">g</span></td>
+          </tr>
+
+          <tr style="border-bottom:1px solid var(--clr-border);background:rgba(147,197,253,.04);">
+            <td colspan="2" style="padding:7px 16px;font-size:11px;font-weight:700;color:#93c5fd;text-transform:uppercase;letter-spacing:.05em;">💪 Proteínas</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--clr-border);">
+            <td style="padding:11px 16px 11px 24px;color:var(--clr-text);">Proteínas</td>
+            <td style="padding:11px 16px;text-align:right;font-weight:600;color:#93c5fd;">{item.protein} <span style="font-size:11px;font-weight:400;color:var(--clr-muted);">g</span></td>
+          </tr>
+
+          <tr style="border-bottom:1px solid var(--clr-border);background:rgba(253,230,138,.04);">
+            <td colspan="2" style="padding:7px 16px;font-size:11px;font-weight:700;color:#fde68a;text-transform:uppercase;letter-spacing:.05em;">🫒 Gorduras</td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--clr-border);">
+            <td style="padding:11px 16px 11px 24px;color:var(--clr-text);">Gorduras Totais</td>
+            <td style="padding:11px 16px;text-align:right;font-weight:600;color:var(--clr-text);">{item.fat} <span style="font-size:11px;font-weight:400;color:var(--clr-muted);">g</span></td>
+          </tr>
+          <tr style="border-bottom:1px solid var(--clr-border);background:rgba(255,255,255,.02);">
+            <td style="padding:10px 16px 10px 36px;color:var(--clr-muted);font-size:13px;">↳ Gorduras Saturadas</td>
+            <td style="padding:10px 16px;text-align:right;color:var(--clr-muted);font-size:13px;">{item.saturatedFat} <span style="font-size:11px;">g</span></td>
+          </tr>
+
+          <!-- MINERAIS -->
+          <tr style="border-bottom:1px solid var(--clr-border);background:rgba(167,139,250,.04);">
+            <td colspan="2" style="padding:7px 16px;font-size:11px;font-weight:700;color:#a78bfa;text-transform:uppercase;letter-spacing:.05em;">💊 Minerais</td>
+          </tr>
+          {[
+            { name: 'Sódio', value: item.sodium, unit: 'mg', warn: item.sodium > 400 },
+            { name: 'Cálcio', value: item.calcium_mg, unit: 'mg' },
+            { name: 'Ferro', value: item.iron_mg, unit: 'mg' },
+            { name: 'Magnésio', value: item.magnesium_mg, unit: 'mg' },
+            { name: 'Potássio', value: item.potassium_mg, unit: 'mg' },
+            { name: 'Zinco', value: item.zinc_mg, unit: 'mg' },
+          ].map((row, i) => (
+            <tr style={`border-bottom:1px solid var(--clr-border);background:${i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,.02)'};`}>
+              <td style="padding:11px 16px 11px 24px;color:var(--clr-text);">{row.name}</td>
+              <td style={`padding:11px 16px;text-align:right;font-weight:600;color:${row.warn ? '#f87171' : 'var(--clr-text)'};`}>
+                {row.value > 0 ? row.value : '—'} <span style="font-size:11px;font-weight:400;color:var(--clr-muted);">{row.unit}</span>
+              </td>
+            </tr>
+          ))}
+
+          <!-- VITAMINAS -->
+          <tr style="border-bottom:1px solid var(--clr-border);background:rgba(52,211,153,.04);">
+            <td colspan="2" style="padding:7px 16px;font-size:11px;font-weight:700;color:#34d399;text-transform:uppercase;letter-spacing:.05em;">🌿 Vitaminas</td>
+          </tr>
+          {[
+            { name: 'Vitamina C', value: item.vitaminC_mg, unit: 'mg' },
+            { name: 'Vitamina D', value: item.vitaminD_mcg, unit: 'mcg' },
+            { name: 'Vitamina B12', value: item.vitaminB12_mcg, unit: 'mcg' },
+          ].map((row, i) => (
+            <tr style={`border-bottom:1px solid var(--clr-border);background:${i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,.02)'};`}>
+              <td style="padding:11px 16px 11px 24px;color:var(--clr-text);">{row.name}</td>
+              <td style="padding:11px 16px;text-align:right;font-weight:600;color:var(--clr-text);">
+                {row.value > 0 ? row.value : '—'} <span style="font-size:11px;font-weight:400;color:var(--clr-muted);">{row.unit}</span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Indicadores qualitativos -->
+  {(item.glycemicIndex || item.antiInflammatoryScore) && (
+    <section style="margin-bottom:32px;">
+      <h2 style="font-size:14px;font-weight:700;color:var(--clr-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px;">
+        Indicadores Qualitativos
+      </h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        {item.glycemicIndex && (
+          <div style="background:var(--clr-surface);border:1px solid var(--clr-border);border-radius:var(--radius);padding:16px;">
+            <p style="font-size:11px;font-weight:700;color:var(--clr-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Índice Glicêmico</p>
+            <p>
+              <span style={`font-size:22px;font-weight:800;color:${giColor};`}>
+                {item.glycemicIndex === 0 ? '—' : item.glycemicIndex}
+              </span>
+              <span style={`margin-left:8px;font-size:12px;font-weight:600;color:${giColor};`}>{giLabel}</span>
+            </p>
+            <p style="font-size:11px;color:var(--clr-muted);margin-top:4px;">Escala 0-100 · &lt;55 = baixo</p>
+          </div>
+        )}
+        {item.antiInflammatoryScore && (
+          <div style="background:var(--clr-surface);border:1px solid var(--clr-border);border-radius:var(--radius);padding:16px;">
+            <p style="font-size:11px;font-weight:700;color:var(--clr-muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Score Anti-inflamatório</p>
+            <p>
+              <span style={`font-size:22px;font-weight:800;color:${scoreColor};`}>{item.antiInflammatoryScore}</span>
+              <span style="margin-left:4px;font-size:12px;color:var(--clr-muted);">/10</span>
+            </p>
+            <p style="font-size:11px;color:var(--clr-muted);margin-top:4px;">Escala 0-10 · 10 = altamente anti-inflamatório</p>
+          </div>
+        )}
+      </div>
+    </section>
+  )}
+
+  <!-- CTA para o app -->
+  <div style="background:linear-gradient(135deg,rgba(16,185,129,.1),rgba(6,78,59,.1));border:1px solid rgba(16,185,129,.2);border-radius:16px;padding:24px;text-align:center;">
+    <p style="font-size:14px;font-weight:700;color:var(--clr-text);margin-bottom:8px;">📱 Analise suas refeições com IA</p>
+    <p style="font-size:13px;color:var(--clr-muted);margin-bottom:16px;line-height:1.5;">
+      Registre, compare e acompanhe sua alimentação com o Flavos Healthy — gratuito e offline.
+    </p>
+    <a
+      href="https://healthy.flavoscompany.xyz"
+      style="display:inline-block;background:#10b981;color:#fff;font-weight:700;font-size:13px;padding:10px 24px;border-radius:10px;text-decoration:none;"
+    >
+      Abrir o app →
+    </a>
+  </div>
+
+  <!-- Nota legal -->
+  <p style="margin-top:24px;font-size:12px;color:var(--clr-muted);line-height:1.6;text-align:center;">
+    {item.source === 'IBGE-POF'
+      ? 'As informações nutricionais desta página são baseadas na Pesquisa de Orçamentos Familiares (POF/IBGE). Valores por 100g do alimento na forma indicada.'
+      : 'As informações nutricionais desta página são baseadas na TACO (Tabela Brasileira de Composição de Alimentos), 4ª edição revisada e ampliada, NEPA–UNICAMP, 2011. Valores por 100g do alimento na forma indicada.'
+    }
+    Estas informações têm caráter educativo e não substituem a orientação de um nutricionista.
+  </p>
+
+</BaseLayout>

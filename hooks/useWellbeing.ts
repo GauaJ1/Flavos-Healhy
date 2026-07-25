@@ -119,7 +119,7 @@ export function useWellbeing(history: HistoryEntry[]) {
         
         const totalWeight = meal.foods.reduce((sum, f) => sum + (f.estimatedWeightGrams || 1), 0);
         const ultraWeight = meal.foods.reduce((sum, f) => sum + (f.processingLevel === 'ultraprocessado' ? f.estimatedWeightGrams : 0), 0);
-        const naturalWeight = meal.foods.reduce((sum, f) => sum + (f.processingLevel === 'in_natura' || f.processingLevel === 'minimamente_processado' ? f.estimatedWeightGrams : 0), 0);
+        const naturalWeight = meal.foods.reduce((sum, f) => sum + (f.processingLevel === 'in natura' || f.processingLevel === 'minimamente processado' ? f.estimatedWeightGrams : 0), 0);
         
         const pctUltra = (ultraWeight / totalWeight) * 100;
         const pctNatural = (naturalWeight / totalWeight) * 100;

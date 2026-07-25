@@ -33,6 +33,7 @@ import AchievementsPanel from './AchievementsPanel';
 import DiversityPanel from './DiversityPanel';
 import { MealPlanPanel } from './MealPlanPanel';
 import WeeklyReportCard from './WeeklyReportCard';
+import WeeklyReportCharts from './WeeklyReportCharts';
 import WellbeingPanel from './WellbeingPanel';
 import { AdaptiveTDEECard } from './AdaptiveTDEECard';
 import { CarbCycleCard } from './CarbCycleCard';
@@ -47,6 +48,7 @@ interface DashboardViewProps {
   onOpenProfile: () => void;
   weeklyReminder?: any;
   onNavigateToReminderFlow?: () => void;
+  onExportPdf?: () => void;
 }
 
 const DashboardView: React.FC<DashboardViewProps> = ({
@@ -57,6 +59,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenProfile,
   weeklyReminder,
   onNavigateToReminderFlow,
+  onExportPdf,
 }) => {
   const goals = loadGoals();
   const { macros } = useDailyStats(history);
@@ -353,7 +356,17 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* Diversidade alimentar + janela (Fase 3) */}
       <div className="space-y-3">
-        <p className="text-xs text-gray-500 font-medium pl-1 mb-0">Qualidade Alimentar</p>
+        <div className="flex items-center justify-between pl-1">
+          <p className="text-xs text-gray-500 font-medium mb-0">Qualidade Alimentar</p>
+          {onExportPdf && (
+            <button
+              onClick={onExportPdf}
+              className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 bg-emerald-950/40 border border-emerald-500/30 px-3 py-1 rounded-xl transition-all"
+            >
+              📄 Exportar PDF
+            </button>
+          )}
+        </div>
         <DiversityPanel diversity={weeklyDiversity} eatingWindow={eatingWindow} />
         <WeeklyReportCard
           report={latestReport}
@@ -361,7 +374,11 @@ const DashboardView: React.FC<DashboardViewProps> = ({
           onGenerate={generateReportManually}
           error={error}
           hasMinimumHistory={history.length >= 3}
+          calorieGoal={todayGoals.calories}
         />
+        {history.length >= 2 && (
+          <WeeklyReportCharts history={history} />
+        )}
       </div>
 
       {/* Correlações e Bem-Estar (Fase 4) */}

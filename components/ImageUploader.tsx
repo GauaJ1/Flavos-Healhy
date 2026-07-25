@@ -5,9 +5,10 @@ import { motion } from 'framer-motion';
 interface ImageUploaderProps {
   onImageSelected: (file: File) => void;
   onTakePhoto: () => void;
+  onOpenBarcodeScanner?: () => void;
 }
 
-const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected, onTakePhoto }) => {
+const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected, onTakePhoto, onOpenBarcodeScanner }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -59,7 +60,7 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected, onTakePh
             O que vamos comer hoje?
         </h2>
         <p className="text-gray-400 text-lg">
-            Envie uma <span className="text-emerald-400 font-medium">foto real</span> do seu alimento ou produto.
+            Envie uma <span className="text-emerald-400 font-medium">foto real</span> ou escaneie um <span className="text-purple-400 font-medium">código de barras</span>.
         </p>
       </motion.div>
 
@@ -69,7 +70,6 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected, onTakePh
         onChange={handleFileChange}
         className="hidden"
         accept="image/*"
-        /* capture="environment" removido para permitir abrir a galeria */
       />
       
       <motion.div 
@@ -85,7 +85,6 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected, onTakePh
             ? 'border-emerald-500 bg-emerald-900/20 shadow-[0_0_30px_rgba(16,185,129,0.2)]' 
             : 'border-gray-700 bg-gray-800/40 hover:bg-gray-800/60 hover:border-emerald-500/50 hover:shadow-2xl'}`}
       >
-        {/* Background subtle glow */}
         <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
 
         <motion.div 
@@ -101,30 +100,44 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ onImageSelected, onTakePh
           Toque para enviar ou arraste
         </h3>
         <p className="text-gray-500 text-sm relative z-10 font-medium text-center px-4">
-           Aceitamos refeições, ingredientes ou embalagens (caixas, latas, etc.)
+           Aceitamos refeições, ingredientes ou embalagens
         </p>
       </motion.div>
 
-      <div className="flex flex-col sm:flex-row items-center justify-center gap-4 w-full mt-8">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full mt-8">
             <motion.button
-                whileHover={{ scale: 1.05, backgroundColor: "rgba(16, 185, 129, 1)" }}
-                whileTap={{ scale: 0.95 }}
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
                 onClick={handleClick}
-                className="flex-1 w-full sm:w-auto bg-gray-800 border border-gray-700 hover:border-emerald-500 text-gray-200 font-semibold py-4 px-6 rounded-xl transition-all shadow-lg hover:shadow-emerald-500/10 inline-flex items-center justify-center gap-3"
+                className="w-full bg-gray-800 border border-gray-700 hover:border-emerald-500 text-gray-200 font-semibold py-4 px-4 rounded-xl transition-all shadow-lg hover:shadow-emerald-500/10 inline-flex items-center justify-center gap-2"
             >
-                <PhotoIcon className="w-6 h-6 text-emerald-400" />
+                <PhotoIcon className="w-5 h-5 text-emerald-400" />
                 Galeria
             </motion.button>
 
             <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
                 onClick={onTakePhoto}
-                className="flex-1 w-full sm:w-auto bg-gradient-to-r from-emerald-600 to-emerald-500 text-white font-bold py-4 px-6 rounded-xl hover:shadow-lg hover:shadow-emerald-500/30 transition-all inline-flex items-center justify-center gap-3"
+                className="w-full bg-gradient-to-r from-emerald-600 to-emerald-500 text-white font-bold py-4 px-4 rounded-xl hover:shadow-lg hover:shadow-emerald-500/30 transition-all inline-flex items-center justify-center gap-2"
             >
-                <CameraIcon className="w-6 h-6" />
+                <CameraIcon className="w-5 h-5" />
                 Tirar Foto
             </motion.button>
+
+            {onOpenBarcodeScanner && (
+              <motion.button
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={onOpenBarcodeScanner}
+                  className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-bold py-4 px-4 rounded-xl hover:shadow-lg hover:shadow-purple-500/30 transition-all inline-flex items-center justify-center gap-2"
+              >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m-8-16v16m4-16v16m8-16v16m4-16v16" />
+                  </svg>
+                  Barcode
+              </motion.button>
+            )}
       </div>
     </div>
   );

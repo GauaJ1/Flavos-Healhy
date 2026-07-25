@@ -86,7 +86,7 @@ function makeAnalysis(protein: number, carbs: number, fat: number): AnalysisResu
         consumedFraction: 1,
         healthHighlights: [],
         attentionHighlights: [],
-        processingLevel: 'in_natura',
+        processingLevel: 'in natura',
         possibleAddedSugars: false,
         possibleAddedFats: false,
         possibleExcessSodium: false,

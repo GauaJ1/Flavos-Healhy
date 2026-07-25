@@ -5,10 +5,15 @@
     <uses-permission android:name="android.permission.health.WRITE_HYDRATION" />
     <uses-permission android:name="android.permission.health.WRITE_WEIGHT" />
 
-    <!-- Health Connect Permissions (Leitura — Fase futura) -->
+    <!-- Health Connect Permissions (Leitura) -->
     <uses-permission android:name="android.permission.health.READ_NUTRITION" />
     <uses-permission android:name="android.permission.health.READ_STEPS" />
     <uses-permission android:name="android.permission.health.READ_WEIGHT" />
+    <!-- Leitura Saúde 360° (Big Update v5.0) -->
+    <uses-permission android:name="android.permission.health.READ_SLEEP" />
+    <uses-permission android:name="android.permission.health.READ_EXERCISE" />
+    <!-- READ_HEART_RATE omitido intencionalmente até ter implementação ativa
+         (menos permissões pedidas = maior taxa de opt-in dos usuários) -->
 
     <!-- Declare que o app usa Health Connect -->
     <queries>

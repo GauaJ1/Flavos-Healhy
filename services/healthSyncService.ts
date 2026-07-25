@@ -83,6 +83,21 @@ interface HealthSyncPlugin {
     success: boolean;
     weightKg: number;
   }>;
+
+  readSleepData(): Promise<{
+    hasData: boolean;
+    durationMinutes?: number;
+    startTime?: string;
+    endTime?: string;
+    reason?: string;
+  }>;
+
+  readActivityData(): Promise<{
+    steps: number;
+    hasWorkout: boolean;
+    workoutTitle?: string;
+    workoutType?: string;
+  }>;
 }
 
 // Registrar plugin nativo — só funciona no Capacitor (Android)
@@ -242,5 +257,48 @@ export async function syncWeight(weightKg: number): Promise<boolean> {
   } catch (error) {
     console.error('[HealthSync] Erro ao sincronizar peso:', error);
     return false;
+  }
+}
+
+/**
+ * Lê a sessão de sono principal das últimas 24h via Health Connect.
+ * Retorna durationMinutes (apenas se >= 180 min). No browser, retorna hasData: false.
+ */
+export async function readSleepData(): Promise<{
+  hasData: boolean;
+  durationMinutes?: number;
+  startTime?: string;
+  endTime?: string;
+  reason?: string;
+}> {
+  if (!isNativePlatform()) {
+    return { hasData: false, reason: 'Health Connect disponível apenas no Android nativo' };
+  }
+  try {
+    return await HealthSync.readSleepData();
+  } catch (error) {
+    console.error('[HealthSync] Erro ao ler sono:', error);
+    return { hasData: false, reason: 'Falha ao ler dados de sono' };
+  }
+}
+
+/**
+ * Lê a contagem de passos agregada e exercício do dia via Health Connect.
+ * No browser, retorna steps: 0.
+ */
+export async function readActivityData(): Promise<{
+  steps: number;
+  hasWorkout: boolean;
+  workoutTitle?: string;
+  workoutType?: string;
+}> {
+  if (!isNativePlatform()) {
+    return { steps: 0, hasWorkout: false };
+  }
+  try {
+    return await HealthSync.readActivityData();
+  } catch (error) {
+    console.error('[HealthSync] Erro ao ler atividade:', error);
+    return { steps: 0, hasWorkout: false };
   }
 }

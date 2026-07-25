@@ -72,7 +72,7 @@ export interface FoodItem {
   consumedFraction: number;
   healthHighlights: string[];
   attentionHighlights: string[];
-  processingLevel: 'in_natura' | 'minimamente_processado' | 'processado' | 'ultraprocessado' | 'indeterminado';
+  processingLevel: 'in natura' | 'minimamente processado' | 'processado' | 'ultraprocessado';
   possibleAddedSugars: boolean;
   possibleAddedFats: boolean;
   possibleExcessSodium: boolean;
@@ -97,6 +97,7 @@ export interface FoodItem {
   };
   // Fase 3:
   foodGroup?: string;
+  dataSource?: 'TACO' | 'IBGE-POF';
 }
 
 // ────────────────────────────────────────────────────────
@@ -127,11 +128,10 @@ export interface NutritionScore {
 // ────────────────────────────────────────────────────────
 
 export interface ProcessingBreakdown {
-  inNatura: number;             // Percentual
+  inNatura: number;
   minimamenteProcessado: number;
   processado: number;
   ultraprocessado: number;
-  indeterminado: number;
 }
 
 // ────────────────────────────────────────────────────────
@@ -160,12 +160,16 @@ export const HOUSEHOLD_MEASURES = [
 ] as const;
 
 export interface AnalysisResult {
-  analysisMetadata: AnalysisMetadata;
-  nutritionalSummary: NutritionalSummary;
+  analysisMetadata?: AnalysisMetadata;
+  nutritionalSummary?: NutritionalSummary;
   foods: FoodItem[];
-  hiddenIngredientsPossible: string[];
-  feedback: string;
-  suggestions: {
+  hiddenIngredientsPossible?: string[];
+  feedback?: string;
+  advice?: string;
+  totalCalories?: number;
+  harmonyScore?: number;
+  inflammatoryClassification?: string;
+  suggestions?: {
     title: string;
     details: string;
   }[];

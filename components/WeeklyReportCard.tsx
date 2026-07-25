@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { WeeklyReport } from '../hooks/useWeeklyReports';
+import WeeklyReportCharts from './WeeklyReportCharts';
 
 interface WeeklyReportCardProps {
   report: WeeklyReport | null;
@@ -8,6 +9,8 @@ interface WeeklyReportCardProps {
   onGenerate: () => void;
   error: string | null;
   hasMinimumHistory: boolean;
+  /** Meta calórica diária para mostrar barra de progresso vs. meta no gráfico. */
+  calorieGoal?: number;
 }
 
 const WeeklyReportCard: React.FC<WeeklyReportCardProps> = ({
@@ -16,6 +19,7 @@ const WeeklyReportCard: React.FC<WeeklyReportCardProps> = ({
   onGenerate,
   error,
   hasMinimumHistory,
+  calorieGoal,
 }) => {
   const [showStats, setShowStats] = useState(false);
 
@@ -131,14 +135,14 @@ const WeeklyReportCard: React.FC<WeeklyReportCardProps> = ({
               </div>
             </div>
 
-            {/* Expandable Stats Summary */}
-            <div className="border-t border-gray-750 pt-3">
+            {/* Expandable Charts Section */}
+            <div className="border-t border-gray-700/50 pt-3">
               <button
                 onClick={() => setShowStats(!showStats)}
                 className="w-full flex justify-between items-center text-xs font-semibold text-gray-400 hover:text-gray-200 transition-colors"
               >
-                <span>📊 Estatísticas Agregadas da Semana</span>
-                <span>{showStats ? '▲ Ocultar' : '▼ Mostrar'}</span>
+                <span>📊 Análise Visual da Semana</span>
+                <span>{showStats ? '▲ Ocultar' : '▼ Ver gráficos'}</span>
               </button>
 
               <AnimatePresence>
@@ -149,33 +153,10 @@ const WeeklyReportCard: React.FC<WeeklyReportCardProps> = ({
                     exit={{ height: 0, opacity: 0 }}
                     className="overflow-hidden mt-3"
                   >
-                    <div className="grid grid-cols-2 gap-2 pb-2">
-                      <div className="bg-gray-900/30 border border-gray-750 rounded-xl p-2.5">
-                        <span className="text-[9px] text-gray-500 font-bold uppercase block">Nota Média</span>
-                        <span className="text-base font-extrabold text-emerald-400">{report.stats.averageDailyScore}<span className="text-[10px] font-normal text-gray-500">/100</span></span>
-                      </div>
-                      <div className="bg-gray-900/30 border border-gray-750 rounded-xl p-2.5">
-                        <span className="text-[9px] text-gray-500 font-bold uppercase block">Média Calórica</span>
-                        <span className="text-base font-extrabold text-white">{report.stats.averageDailyCalories} <span className="text-[10px] font-normal text-gray-400">kcal/dia</span></span>
-                      </div>
-                      <div className="bg-gray-900/30 border border-gray-750 rounded-xl p-2.5">
-                        <span className="text-[9px] text-gray-500 font-bold uppercase block">Ultraprocessados</span>
-                        <span className={`text-base font-extrabold ${report.stats.ultraProcessedPercent > 25 ? 'text-amber-400' : 'text-emerald-400'}`}>
-                          {report.stats.ultraProcessedPercent}%
-                        </span>
-                      </div>
-                      <div className="bg-gray-900/30 border border-gray-750 rounded-xl p-2.5">
-                        <span className="text-[9px] text-gray-500 font-bold uppercase block">Janela de Alimentação</span>
-                        <span className="text-base font-extrabold text-blue-400">{report.stats.averageEatingWindowHours} <span className="text-[10px] font-normal text-gray-400">horas</span></span>
-                      </div>
-                    </div>
-
-                    {report.stats.missingFoodGroups.length > 0 && (
-                      <div className="mt-2 bg-yellow-500/5 border border-yellow-500/10 rounded-xl p-2.5">
-                        <span className="text-[9px] text-yellow-500 font-bold uppercase block">Grupos Não Consumidos</span>
-                        <span className="text-xs text-gray-300 capitalize">{report.stats.missingFoodGroups.join(', ')}</span>
-                      </div>
-                    )}
+                    <WeeklyReportCharts
+                      stats={report.stats}
+                      calorieGoal={calorieGoal}
+                    />
                   </motion.div>
                 )}
               </AnimatePresence>

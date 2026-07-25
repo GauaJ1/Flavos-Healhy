@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Allow: /alimentos/
+Allow: /api/
+
+Sitemap: https://healthy.flavoscompany.xyz/sitemap.xml

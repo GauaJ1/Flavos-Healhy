@@ -19,36 +19,35 @@ export type FoodGroup =
   | 'frutas'
   | 'laticinios'
   | 'gorduras'
-  | 'ultra';
+  | 'ultraprocessados';
 
 export const FOOD_GROUP_META: Record<FoodGroup, { label: string; color: string; emoji: string }> = {
-  cereais:     { label: 'Cereais',      color: '#f59e0b', emoji: '🌾' },
-  proteinas:   { label: 'Proteínas',    color: '#ef4444', emoji: '🥩' },
-  leguminosas: { label: 'Leguminosas',  color: '#8b5cf6', emoji: '🫘' },
-  vegetais:    { label: 'Vegetais',     color: '#22c55e', emoji: '🥦' },
-  frutas:      { label: 'Frutas',       color: '#f97316', emoji: '🍎' },
-  laticinios:  { label: 'Laticínios',   color: '#3b82f6', emoji: '🧀' },
-  gorduras:    { label: 'Gorduras boas',color: '#a3e635', emoji: '🥑' },
-  ultra:       { label: 'Ultraprocessados', color: '#6b7280', emoji: '🍟' },
+  cereais:           { label: 'Cereais',           color: '#f59e0b', emoji: '🌾' },
+  proteinas:         { label: 'Proteínas',          color: '#ef4444', emoji: '🥩' },
+  leguminosas:       { label: 'Leguminosas',         color: '#8b5cf6', emoji: '🫘' },
+  vegetais:          { label: 'Vegetais',            color: '#22c55e', emoji: '🥦' },
+  frutas:            { label: 'Frutas',              color: '#f97316', emoji: '🍎' },
+  laticinios:        { label: 'Laticínios',          color: '#3b82f6', emoji: '🧀' },
+  gorduras:          { label: 'Gorduras boas',       color: '#a3e635', emoji: '🥑' },
+  ultraprocessados:  { label: 'Ultraprocessados',    color: '#6b7280', emoji: '🍟' },
 };
 
 const FOOD_GROUPS: Record<FoodGroup, string[]> = {
-  cereais:     ['arroz','macarrão','massa','pão','aveia','tapioca','cuscuz','batata','mandioca','polenta','milho','trigo','farinha','canjica'],
-  proteinas:   ['frango','carne','peixe','ovo','atum','salmão','sardinha','camarão','tilápia','cação','bife','alcatra','picanha','peito','coxa'],
-  leguminosas: ['feijão','lentilha','grão-de-bico','soja','ervilha','fradinho','carioca'],
-  vegetais:    ['alface','tomate','brócolis','cenoura','couve','espinafre','chuchu','abobrinha','pepino','rúcula','beterraba','quiabo','jiló'],
-  frutas:      ['banana','maçã','laranja','manga','morango','melancia','mamão','uva','limão','caju','goiaba','abacaxi','melão','kiwi'],
-  laticinios:  ['queijo','iogurte','leite','requeijão','whey','creme de leite','manteiga','muçarela','parmesão'],
-  gorduras:    ['azeite','abacate','castanha','amendoim','semente','nozes','chia','linhaça','gergelim','coco'],
-  ultra:       ['refrigerante','salgadinho','biscoito recheado','nugget','macarrão instantâneo','empanado','presunto','salsicha','mortadela','copa','bacon','hambúrguer'],
+  cereais:          ['arroz','macarrão','massa','pão','aveia','tapioca','cuscuz','batata','mandioca','polenta','milho','trigo','farinha','canjica'],
+  proteinas:        ['frango','carne','peixe','ovo','atum','salmão','sardinha','camarão','tilápia','cação','bife','alcatra','picanha','peito','coxa'],
+  leguminosas:      ['feijão','lentilha','grão-de-bico','soja','ervilha','fradinho','carioca'],
+  vegetais:         ['alface','tomate','brócolis','cenoura','couve','espinafre','chuchu','abobrinha','pepino','rúcula','beterraba','quiabo','jiló'],
+  frutas:           ['banana','maçã','laranja','manga','morango','melancia','mamão','uva','limão','caju','goiaba','abacaxi','melão','kiwi'],
+  laticinios:       ['queijo','iogurte','leite','requeijão','whey','creme de leite','manteiga','muçarela','parmesão'],
+  gorduras:         ['azeite','abacate','castanha','amendoim','semente','nozes','chia','linhaça','gergelim','coco'],
+  ultraprocessados: ['refrigerante','salgadinho','biscoito recheado','nugget','macarrão instantâneo','empanado','presunto','salsicha','mortadela','copa','bacon','hambúrguer'],
 };
 
 const QUALITY_WEIGHT: Record<string, number> = {
-  'in_natura':                1.0,
-  'minimamente_processado':   0.85,
-  'processado':               0.5,
-  'ultraprocessado':          0.15,
-  'indeterminado':            0.6,
+  'in natura':              1.0,
+  'minimamente processado': 0.85,
+  'processado':             0.5,
+  'ultraprocessado':        0.15,
 };
 
 export function classifyFoodGroup(name: string): FoodGroup | null {
@@ -74,7 +73,7 @@ function calcWeeklyDiversity(weekMeals: HistoryEntry[]): WeeklyDiversityResult {
   const groupsSeen = new Set<FoodGroup>();
   const groupsCount: Record<FoodGroup, number> = {
     cereais: 0, proteinas: 0, leguminosas: 0, vegetais: 0,
-    frutas: 0, laticinios: 0, gorduras: 0, ultra: 0,
+    frutas: 0, laticinios: 0, gorduras: 0, ultraprocessados: 0,
   };
   let totalQuality = 0;
   let count = 0;
@@ -86,8 +85,13 @@ function calcWeeklyDiversity(weekMeals: HistoryEntry[]): WeeklyDiversityResult {
       groupsSeen.add(group);
       groupsCount[group] = (groupsCount[group] || 0) + 1;
     }
-    const level = food.processingLevel || 'indeterminado';
-    totalQuality += QUALITY_WEIGHT[level] ?? 0.6;
+    const raw = food.processingLevel as string;
+    const level = (raw === 'in_natura') ? 'in natura' :
+                  (raw === 'minimamente_processado') ? 'minimamente processado' :
+                  (raw === 'indeterminado' || !raw) ? 'processado' : raw;
+
+    const weight = QUALITY_WEIGHT[level] ?? 0.5;
+    totalQuality += weight;
     count++;
     if (level === 'ultraprocessado') ultraCount++;
   });

@@ -70,7 +70,7 @@ export function useWeeklyReports(history: HistoryEntry[]) {
           ultraCount++;
         }
         const group = classifyFoodGroup(food.name);
-        if (group && group !== 'ultra') {
+        if (group && group !== 'ultraprocessados') {
           groupsSeen.add(group);
         }
         daily[dateKey].carbs += food.carbohydrates || 0;
