@@ -2,7 +2,7 @@
  * WeeklyReportCharts — Gráficos do Relatório Semanal
  *
  * Quatro visualizações compactas, projetadas para caber em 375px sem overflow:
- * 1. ScoreRadial — RadialBar do Score Harmonia 360° (0-100)
+ * 1. ScoreRadial — RadialBar do Score Nutricional Médio (0-100)
  * 2. Mini-stats de calorias médias e janela alimentar
  * 3. MacroBar — barras horizontais de C/P/G médios (BarChart)
  * 4. UltraprocessedBar + DiversityBar — barras de progresso nativas
@@ -82,7 +82,7 @@ const ScoreRadialChart: React.FC<{ score: number }> = ({ score }) => {
   return (
     <div className="flex flex-col items-center">
       <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1 self-start">
-        Score Semanal
+        Score Nutricional
       </p>
       <div className="relative w-[88px] h-[88px]">
         <ResponsiveContainer width="100%" height="100%">

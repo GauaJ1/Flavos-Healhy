@@ -11,7 +11,7 @@
  * - Arco-íris de diversidade alimentar + janela alimentar (Fase 3)
  * - Deep Link Samsung Health (Android)
  */
-import React, { useCallback, useState, useMemo } from 'react';
+import React, { useCallback, useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import type { HistoryEntry } from '../types';
 import { useDailyStats, loadGoals } from '../hooks/useDailyStats';
@@ -22,8 +22,9 @@ import { useAchievements } from '../hooks/useAchievements';
 import { useFoodDiversity } from '../hooks/useFoodDiversity';
 import { useUserProfile, calcTargets } from '../hooks/useUserProfile';
 import { useWeeklyReports } from '../hooks/useWeeklyReports';
-import { useAdaptiveTDEE } from '../hooks/useAdaptiveTDEE';
-import { useCarbCycle } from '../hooks/useCarbCycle';
+import { readActivityData } from '../services/healthSyncService';
+import type { AdaptiveTDEEState } from '../hooks/useAdaptiveTDEE';
+import type { CycleWeekSummary, CycleDayMacros, CycleDay } from '../hooks/useCarbCycle';
 import CalorieRing from './CalorieRing';
 import MacroCards from './MacroCards';
 import HydrationTracker from './HydrationTracker';
@@ -36,6 +37,7 @@ import WeeklyReportCard from './WeeklyReportCard';
 import WellbeingPanel from './WellbeingPanel';
 import { AdaptiveTDEECard } from './AdaptiveTDEECard';
 import { CarbCycleCard } from './CarbCycleCard';
+import { Health360Card } from './Health360Card';
 import type { DailyGoals } from '../hooks/useDailyStats';
 import type { NutritionalTargets } from '../hooks/useUserProfile';
 
@@ -48,6 +50,16 @@ interface DashboardViewProps {
   weeklyReminder?: any;
   onNavigateToReminderFlow?: () => void;
   onExportPdf?: () => void;
+  tdeeState: AdaptiveTDEEState;
+  effectiveTDEE: number;
+  effectiveTarget: number;
+  acceptOverride: () => void;
+  rejectOverride: () => void;
+  weekSummary: CycleWeekSummary | null;
+  todayMacros: CycleDayMacros | null;
+  selectedDay: number;
+  setSelectedDay: (day: number) => void;
+  updateDayType: (dayIndex: number, type: CycleDay, activity?: string) => void;
 }
 
 const DashboardView: React.FC<DashboardViewProps> = ({
@@ -59,10 +71,30 @@ const DashboardView: React.FC<DashboardViewProps> = ({
   weeklyReminder,
   onNavigateToReminderFlow,
   onExportPdf,
+  tdeeState,
+  effectiveTDEE,
+  effectiveTarget,
+  acceptOverride,
+  rejectOverride,
+  weekSummary,
+  todayMacros,
+  selectedDay,
+  setSelectedDay,
+  updateDayType,
 }) => {
   const goals = loadGoals();
   const { macros } = useDailyStats(history);
-  const hydration = useHydration(isSyncEnabled);
+
+  // Dados de atividade para bônus dinâmico de hidratação
+  const [activityData, setActivityData] = useState<{ steps: number; hasWorkout: boolean } | null>(null);
+  useEffect(() => {
+    if (!isSyncEnabled || !isNative) return;
+    readActivityData()
+      .then((a) => setActivityData({ steps: a.steps, hasWorkout: a.hasWorkout }))
+      .catch(() => {/* silent */});
+  }, [isSyncEnabled, isNative]);
+
+  const hydration = useHydration(isSyncEnabled, activityData);
   const weight = useWeight(isSyncEnabled);
   const { consistencyStreak, calorieGoalStreak } = useStreaks(history);
   const { weeklyDiversity, eatingWindow } = useFoodDiversity(history);
@@ -71,29 +103,6 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
   // Sub-abas de configuração
   const [activeSubTab, setActiveSubTab] = useState<'tdee' | 'cycle'>('tdee');
-
-  // Hook do TDEE adaptativo
-  const {
-    state: tdeeState,
-    effectiveTDEE,
-    effectiveTarget,
-    acceptOverride,
-    rejectOverride,
-  } = useAdaptiveTDEE(
-    weight.entries,
-    history,
-    targets?.tdeeKcal ?? goals.calories,
-    profile?.goal ?? 'manter'
-  );
-
-  // Hook do Ciclo de carboidratos
-  const {
-    weekSummary,
-    selectedDay,
-    setSelectedDay,
-    todayMacros,
-    updateDayType,
-  } = useCarbCycle(effectiveTarget, profile);
 
   // Targets com TDEE adaptativo aplicado
   const currentTargets = useMemo<NutritionalTargets | null>(() => {
@@ -173,6 +182,14 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         'https://play.google.com/store/apps/details?id=com.sec.android.app.shealth';
     }, 1500);
   }, []);
+
+  const todayNutritionScore = useMemo(() => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const todayEntries = history.filter(e => e.date.startsWith(todayStr));
+    if (todayEntries.length === 0) return 75;
+    const scores = todayEntries.map(e => e.harmonyScore || 75);
+    return Math.round(scores.reduce((s, val) => s + val, 0) / scores.length);
+  }, [history]);
 
   return (
     <motion.div
@@ -259,6 +276,16 @@ const DashboardView: React.FC<DashboardViewProps> = ({
       {/* Exibição condicional da aba de TDEE Adaptativo ou Ciclo de Carboidratos */}
       {activeSubTab === 'tdee' ? (
         <>
+          {/* Card Saúde 360° (quando Health Connect sync ativo) */}
+          <Health360Card
+            isSyncEnabled={isSyncEnabled}
+            nutritionScore={todayNutritionScore}
+            effectiveTargetKcal={todayGoals.calories}
+            dailyCaloriesConsumed={macros.calories}
+            todayProteinConsumed={macros.protein}
+            targetProtein={todayGoals.protein}
+          />
+
           {/* Calorie ring */}
           <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-2xl p-5 flex flex-col items-center gap-2">
             <div className="flex justify-between items-center w-full mb-1">
@@ -334,6 +361,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
       <HydrationTracker
         totalMl={hydration.totalMl}
         goalMl={hydration.goalMl}
+        bonusMl={hydration.bonusMl}
         percentage={hydration.percentage}
         entries={hydration.entries}
         onAdd={hydration.addWater}

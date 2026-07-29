@@ -91,6 +91,13 @@ export function useWellbeing(history: HistoryEntry[]) {
         predominio_natural: { count: 0, sum_energy: 0, sum_mood: 0 },
         predominio_ultraprocessado: { count: 0, sum_energy: 0, sum_mood: 0 },
       },
+      // PASSO 6 — correlação Jantar (≥19h) × Qualidade do Sono (score sleep do wellbeing)
+      dinner_sleep_correlation: {
+        // Jantar leve: calorias noturnas < 400 kcal
+        jantar_leve: { count: 0, sum_sleep: 0 },
+        // Jantar pesado: calorias noturnas ≥ 400 kcal
+        jantar_pesado: { count: 0, sum_sleep: 0 },
+      },
       total_samples: 0
     };
 
@@ -178,6 +185,39 @@ export function useWellbeing(history: HistoryEntry[]) {
       }
     });
 
+    // PASSO 6 — Correlação Jantar × Sono
+    // Para cada log de wellbeing com score de sono, busca o jantar da véspera (≥19h no dia anterior)
+    recentLogs.forEach(log => {
+      if (!log.sleep) return; // log sem score de sono, pular
+
+      const logDate = new Date(log.logged_at);
+      // Jantar = refeições do dia anterior entre 19h e 23h59
+      const prevDayStart = new Date(logDate);
+      prevDayStart.setDate(prevDayStart.getDate() - 1);
+      prevDayStart.setHours(19, 0, 0, 0);
+      const prevDayEnd = new Date(logDate);
+      prevDayEnd.setDate(prevDayEnd.getDate() - 1);
+      prevDayEnd.setHours(23, 59, 59, 999);
+
+      const dinnerMeals = recentMeals.filter(m => {
+        const t = new Date(m.date).getTime();
+        return t >= prevDayStart.getTime() && t <= prevDayEnd.getTime();
+      });
+
+      if (dinnerMeals.length === 0) return;
+
+      const dinnerKcal = dinnerMeals.reduce((sum, m) =>
+        sum + m.foods.reduce((fs, f) => fs + (f.calories || 0), 0), 0);
+
+      if (dinnerKcal < 400) {
+        stats.dinner_sleep_correlation.jantar_leve.count++;
+        stats.dinner_sleep_correlation.jantar_leve.sum_sleep += log.sleep;
+      } else {
+        stats.dinner_sleep_correlation.jantar_pesado.count++;
+        stats.dinner_sleep_correlation.jantar_pesado.sum_sleep += log.sleep;
+      }
+    });
+
     return stats;
   }, [logs, history]);
 
@@ -197,6 +237,37 @@ export function useWellbeing(history: HistoryEntry[]) {
       s.processing_correlation.predominio_ultraprocessado.count >= 5
     );
   }, [correlationStats]);
+
+  // Verificar se a correlação Jantar×Sono tem amostras suficientes nos dois buckets
+  const hasDinnerSleepData = useMemo(() => {
+    const ds = correlationStats.dinner_sleep_correlation;
+    return ds.jantar_leve.count >= 5 && ds.jantar_pesado.count >= 5;
+  }, [correlationStats]);
+
+  // Insight derivado da correlação Jantar × Sono (calculado localmente, sem IA)
+  const dinnerSleepInsight = useMemo(() => {
+    if (!hasDinnerSleepData) return null;
+    const ds = correlationStats.dinner_sleep_correlation;
+    const avgSleepLeve = ds.jantar_leve.sum_sleep / ds.jantar_leve.count;
+    const avgSleepPesado = ds.jantar_pesado.sum_sleep / ds.jantar_pesado.count;
+    const diff = avgSleepLeve - avgSleepPesado;
+    if (Math.abs(diff) < 0.3) {
+      return {
+        text: 'Seus dados não mostram diferença clara entre jantar leve e sono. Continue registrando para uma análise mais precisa.',
+        direction: 'neutral' as const,
+      };
+    }
+    if (diff > 0) {
+      return {
+        text: `Nos dias em que o jantar foi mais leve (<400 kcal), seu sono foi ${diff.toFixed(1)} pontos melhor em média.`,
+        direction: 'light' as const,
+      };
+    }
+    return {
+      text: `Seu sono não apresentou queda significativa com jantares mais densos. Seu padrão individual é diferente da média.`,
+      direction: 'heavy' as const,
+    };
+  }, [hasDinnerSleepData, correlationStats]);
 
   const generateInsight = useCallback(async () => {
     if (!hasSufficientSamples) {
@@ -257,6 +328,9 @@ export function useWellbeing(history: HistoryEntry[]) {
     insight,
     generateInsight,
     isGenerating,
-    error
+    error,
+    // PASSO 6 — Correlação Jantar × Sono
+    hasDinnerSleepData,
+    dinnerSleepInsight,
   };
 }

@@ -1,0 +1,5 @@
+2026-07-27 19:33:51.883   373-373   Capacitor/Console       com.flavos.healthy                   E  File: https://localhost/assets/index-FHqm6unJ.js - Line 219 - Msg: TypeError: i is not a function
+2026-07-27 19:33:51.885   373-373   Capacitor/Console       com.flavos.healthy                   E  File: https://localhost/assets/index-FHqm6unJ.js - Line 299 - Msg: Uncaught TypeError: i is not a function
+2026-07-27 19:33:51.889   373-373   Capacitor               com.flavos.healthy                   E  JavaScript Error: {"type":"js.error","error":{"message":"Uncaught TypeError: i is not a function","url":"https://localhost/assets/index-FHqm6unJ.js","line":299,"col":177972,"errorObject":"{}"}}
+
+Confirmar e adicinar produto pelo barcode scan.

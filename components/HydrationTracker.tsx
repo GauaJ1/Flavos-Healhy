@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 interface HydrationTrackerProps {
   totalMl: number;
   goalMl: number;
+  bonusMl?: number;
   percentage: number;
   entries: { time: string; ml: number }[];
   onAdd: (ml: number) => void;
@@ -19,6 +20,7 @@ const QUICK_AMOUNTS = [150, 250, 350, 500];
 const HydrationTracker: React.FC<HydrationTrackerProps> = ({
   totalMl,
   goalMl,
+  bonusMl,
   percentage,
   entries,
   onAdd,
@@ -70,6 +72,11 @@ const HydrationTracker: React.FC<HydrationTrackerProps> = ({
             transition={{ duration: 0.8, ease: 'easeOut' }}
           />
         </div>
+        {bonusMl && bonusMl > 0 ? (
+          <p className="text-[10px] text-cyan-400 mt-1">
+            💡 Meta ajustada para {goalMl} ml hoje (+{bonusMl} ml por atividade física detectada)
+          </p>
+        ) : null}
       </div>
 
       {/* Cup icons */}

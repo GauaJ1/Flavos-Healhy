@@ -110,7 +110,10 @@ const App: React.FC = () => {
   const weight = useWeight(healthSync.isSyncEnabled);
   const {
     state: tdeeState,
+    effectiveTDEE,
     effectiveTarget,
+    acceptOverride,
+    rejectOverride,
   } = useAdaptiveTDEE(
     weight.entries,
     history,
@@ -119,6 +122,10 @@ const App: React.FC = () => {
   );
   const {
     weekConfig,
+    weekSummary,
+    selectedDay,
+    setSelectedDay,
+    todayMacros,
     updateDayType,
   } = useCarbCycle(effectiveTarget, profile);
 
@@ -353,6 +360,16 @@ const App: React.FC = () => {
               weeklyReminder={weeklyReminder}
               onNavigateToReminderFlow={() => setView('carbCycleReminder')}
               onExportPdf={handleExportPdf}
+              tdeeState={tdeeState}
+              effectiveTDEE={effectiveTDEE}
+              effectiveTarget={effectiveTarget}
+              acceptOverride={acceptOverride}
+              rejectOverride={rejectOverride}
+              weekSummary={weekSummary}
+              todayMacros={todayMacros}
+              selectedDay={selectedDay}
+              setSelectedDay={setSelectedDay}
+              updateDayType={updateDayType}
             />
           </motion.div>
         );

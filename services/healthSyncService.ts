@@ -89,6 +89,8 @@ interface HealthSyncPlugin {
     durationMinutes?: number;
     startTime?: string;
     endTime?: string;
+    hasStageData: boolean;
+    deepSleepPercent?: number | null;
     reason?: string;
   }>;
 
@@ -97,6 +99,7 @@ interface HealthSyncPlugin {
     hasWorkout: boolean;
     workoutTitle?: string;
     workoutType?: string;
+    activeCaloriesBurned: number;
   }>;
 }
 
@@ -269,36 +272,39 @@ export async function readSleepData(): Promise<{
   durationMinutes?: number;
   startTime?: string;
   endTime?: string;
+  hasStageData: boolean;
+  deepSleepPercent?: number | null;
   reason?: string;
 }> {
   if (!isNativePlatform()) {
-    return { hasData: false, reason: 'Health Connect disponível apenas no Android nativo' };
+    return { hasData: false, hasStageData: false, reason: 'Health Connect disponível apenas no Android nativo' };
   }
   try {
     return await HealthSync.readSleepData();
   } catch (error) {
     console.error('[HealthSync] Erro ao ler sono:', error);
-    return { hasData: false, reason: 'Falha ao ler dados de sono' };
+    return { hasData: false, hasStageData: false, reason: 'Falha ao ler dados de sono' };
   }
 }
 
 /**
- * Lê a contagem de passos agregada e exercício do dia via Health Connect.
- * No browser, retorna steps: 0.
+ * Lê a contagem de passos agregada, exercício e calorias ativas do dia via Health Connect.
+ * No browser, retorna steps: 0, activeCaloriesBurned: 0.
  */
 export async function readActivityData(): Promise<{
   steps: number;
   hasWorkout: boolean;
   workoutTitle?: string;
   workoutType?: string;
+  activeCaloriesBurned: number;
 }> {
   if (!isNativePlatform()) {
-    return { steps: 0, hasWorkout: false };
+    return { steps: 0, hasWorkout: false, activeCaloriesBurned: 0 };
   }
   try {
     return await HealthSync.readActivityData();
   } catch (error) {
     console.error('[HealthSync] Erro ao ler atividade:', error);
-    return { steps: 0, hasWorkout: false };
+    return { steps: 0, hasWorkout: false, activeCaloriesBurned: 0 };
   }
 }

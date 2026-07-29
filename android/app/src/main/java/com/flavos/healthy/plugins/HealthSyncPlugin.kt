@@ -5,6 +5,7 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import androidx.health.connect.client.permission.HealthPermission
+import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.HydrationRecord
 import androidx.health.connect.client.records.MealType
@@ -82,6 +83,7 @@ class HealthSyncPlugin : Plugin() {
         HealthPermission.getReadPermission(SleepSessionRecord::class),
         HealthPermission.getReadPermission(ExerciseSessionRecord::class),
         HealthPermission.getReadPermission(StepsRecord::class),
+        HealthPermission.getReadPermission(ActiveCaloriesBurnedRecord::class),
     )
 
     override fun load() {
@@ -595,12 +597,26 @@ class HealthSyncPlugin : Plugin() {
                         result.put("durationMinutes", durationMinutes)
                         result.put("startTime", mainSession.startTime.toString())
                         result.put("endTime", mainSession.endTime.toString())
+
+                        val stages = mainSession.stages
+                        if (stages.isNotEmpty()) {
+                            val deepMinutes = stages
+                                .filter { it.stage == SleepSessionRecord.STAGE_TYPE_DEEP }
+                                .sumOf { Duration.between(it.startTime, it.endTime).toMinutes() }
+                            val deepSleepPercent = Math.round((deepMinutes.toDouble() / durationMinutes.toDouble()) * 100.0 * 10.0) / 10.0
+                            result.put("hasStageData", true)
+                            result.put("deepSleepPercent", deepSleepPercent)
+                        } else {
+                            result.put("hasStageData", false)
+                        }
                     } else {
                         result.put("hasData", false)
+                        result.put("hasStageData", false)
                         result.put("reason", "Sessão mais longa detectada (${durationMinutes}min) é menor que 3h — provavelmente soneca")
                     }
                 } else {
                     result.put("hasData", false)
+                    result.put("hasStageData", false)
                     result.put("reason", "Nenhuma sessão de sono encontrada nas últimas 24h")
                 }
 
@@ -616,15 +632,14 @@ class HealthSyncPlugin : Plugin() {
     }
 
     // ──────────────────────────────────────────────────────────────
-    // Leitura Saúde 360° — Atividade Física (Passos + Exercício)
+    // Leitura Saúde 360° — Atividade Física (Passos + Exercício + Calorias Ativas)
     // ──────────────────────────────────────────────────────────────
 
     /**
-     * Lê a contagem de passos e a sessão de exercício do dia atual.
+     * Lê a contagem de passos, calorias ativas e a sessão de exercício do dia atual.
      *
-     * Passos: usa AggregateRequest (agrega/deduplica automaticamente múltiplos fontes
-     * como relógio + celular) — NUNCA somar manualmente os records de passos.
-     * Exercício: retorna a última sessão de exercício do dia.
+     * Usa AggregateRequest oficial (agrega/deduplica automaticamente múltiplos fontes
+     * como relógio + celular).
      */
     @PluginMethod
     fun readActivityData(call: PluginCall) {
@@ -636,13 +651,17 @@ class HealthSyncPlugin : Plugin() {
 
         scope.launch {
             try {
-                // Agrega passos usando API oficial (deduplica fontes automaticamente)
+                // Agrega passos e calorias ativas usando API oficial (deduplica fontes automaticamente)
                 val aggregateRequest = AggregateRequest(
-                    metrics = setOf(StepsRecord.COUNT_TOTAL),
+                    metrics = setOf(
+                        StepsRecord.COUNT_TOTAL,
+                        ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL
+                    ),
                     timeRangeFilter = TimeRangeFilter.between(startOfDay, now)
                 )
                 val aggregateResponse = client.aggregate(aggregateRequest)
                 val totalSteps = aggregateResponse[StepsRecord.COUNT_TOTAL] ?: 0L
+                val activeKcal = aggregateResponse[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]?.inKilocalories ?: 0.0
 
                 // Lê sessões de exercício do dia
                 val exerciseResponse = client.readRecords(
@@ -655,11 +674,12 @@ class HealthSyncPlugin : Plugin() {
 
                 val result = JSObject()
                 result.put("steps", totalSteps)
+                result.put("activeCaloriesBurned", Math.round(activeKcal))
                 result.put("hasWorkout", lastWorkout != null)
                 result.put("workoutTitle", lastWorkout?.title ?: "")
                 result.put("workoutType", lastWorkout?.exerciseType?.toString() ?: "")
 
-                Log.d(TAG, "ℹ️ readActivityData: steps=$totalSteps, hasWorkout=${lastWorkout != null}")
+                Log.d(TAG, "ℹ️ readActivityData: steps=$totalSteps, activeKcal=${Math.round(activeKcal)}, hasWorkout=${lastWorkout != null}")
                 call.resolve(result)
             } catch (e: SecurityException) {
                 call.reject("Sem permissão de leitura de atividade", "PERMISSION_DENIED")

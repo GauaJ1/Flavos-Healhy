@@ -35,7 +35,20 @@ function loadState(): HydrationState {
   }
 }
 
-export function useHydration(syncEnabled: boolean = false) {
+/**
+ * Calcula bônus de hidratação com base em passos ou treino.
+ */
+export function calcDynamicWaterBonus(steps: number, hasWorkout: boolean): number {
+  let bonus = 0;
+  if (hasWorkout || steps > 8000) bonus += 500;
+  if (steps > 12000) bonus += 300;
+  return bonus;
+}
+
+export function useHydration(
+  syncEnabled: boolean = false,
+  activityData?: { steps: number; hasWorkout: boolean } | null
+) {
   const [state, setState] = useState<HydrationState>(loadState);
 
   // Reload when day changes
@@ -80,10 +93,18 @@ export function useHydration(syncEnabled: boolean = false) {
     });
   }, []);
 
-  const percentage = Math.min(100, Math.round((state.totalMl / state.goalMl) * 100));
+  const bonusMl = (syncEnabled && activityData)
+    ? calcDynamicWaterBonus(activityData.steps, activityData.hasWorkout)
+    : 0;
+
+  const effectiveGoalMl = state.goalMl + bonusMl;
+  const percentage = Math.min(100, Math.round((state.totalMl / effectiveGoalMl) * 100));
 
   return {
     ...state,
+    goalMl: effectiveGoalMl,
+    baseGoalMl: state.goalMl,
+    bonusMl,
     percentage,
     addWater,
     setGoal,

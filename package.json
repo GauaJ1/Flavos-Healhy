@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "tsc --noEmit && vite build",
     "export:taco": "node scripts/parse-taco-excel.mjs && node scripts/merge-ibge-database.mjs && node scripts/generate-sitemap.js",
     "merge:ibge": "node scripts/merge-ibge-database.mjs && node scripts/generate-sitemap.js",
     "build:seo": "npm run export:taco && npm run build --prefix packages/alimentos-seo",
