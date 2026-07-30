@@ -12,11 +12,27 @@
 
 import type { FoodItem } from '../types';
 
+/** Metadados completos do produto para armazenar na biblioteca de produtos salvos. */
+export interface SavedProductSource {
+  barcode: string;
+  name: string;
+  brand?: string;
+  imageUrl?: string;
+  packageNetWeightGrams?: number;  // peso líquido da embalagem (ex: 400g)
+  unitWeightGrams?: number;        // peso de 1 porção/unidade padrão
+  unitLabel?: string;              // ex: "barra", "unidade", "fatia"
+  ingredientsText?: string;
+  allergens?: string[];
+  nutriScoreGrade?: string;
+  novaGroup?: number;
+}
+
 export interface BarcodeProductResult {
   found: boolean;
   product?: FoodItem;
   barcode?: string;
   errorMessage?: string;
+  sourceData?: SavedProductSource;  // NOVO — dados expandidos para a biblioteca
 }
 
 /**
@@ -31,6 +47,34 @@ export function mapNovaGroupToProcessingLevel(novaGroup?: number | string | null
     case 4: return 'ultraprocessado';
     default: return 'processado'; // Fallback conservador
   }
+}
+
+/**
+ * Extrai o peso líquido da embalagem do campo quantity (texto) ou product_quantity (número).
+ * Exemplos: "400 g", "200g", product_quantity=400
+ */
+export function parsePackageWeight(
+  quantity?: string,
+  productQuantity?: string | number
+): number | undefined {
+  if (productQuantity) {
+    const n = Number(productQuantity);
+    if (!isNaN(n) && n > 0) return n;
+  }
+  if (quantity) {
+    const match = quantity.match(/(\d+[.,]?\d*)\s*g/i);
+    if (match) return parseFloat(match[1].replace(',', '.'));
+  }
+  return undefined;
+}
+
+/**
+ * Normaliza os allergens_tags do Open Food Facts removendo o prefixo "en:" e hifens.
+ * Exemplo: ["en:gluten", "en:dairy"] -> ["gluten", "dairy"]
+ */
+export function parseAllergens(tags?: string[]): string[] {
+  if (!tags) return [];
+  return tags.map(t => t.replace(/^en:/, '').replace(/-/g, ' '));
 }
 
 /**
@@ -130,10 +174,26 @@ export async function fetchProductByBarcode(barcode: string): Promise<BarcodePro
       possibleIndustrializedSauces: false,
     };
 
+    // Dados expandidos para a biblioteca de produtos salvos
+    const sourceData: SavedProductSource = {
+      barcode: cleanBarcode,
+      name,
+      brand: p.brands || undefined,
+      imageUrl: p.image_front_small_url || p.image_url || undefined,
+      packageNetWeightGrams: parsePackageWeight(p.quantity, p.product_quantity),
+      unitWeightGrams: Number(p.serving_quantity) || undefined,
+      unitLabel: p.serving_size || undefined,
+      ingredientsText: p.ingredients_text_pt || p.ingredients_text || undefined,
+      allergens: parseAllergens(p.allergens_tags),
+      nutriScoreGrade: p.nutriscore_grade || undefined,
+      novaGroup: Number(p.nova_group ?? p.nova_groups) || undefined,
+    };
+
     return {
       found: true,
       product: foodItem,
       barcode: cleanBarcode,
+      sourceData,
     };
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Erro de rede';

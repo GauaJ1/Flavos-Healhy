@@ -182,3 +182,35 @@ export interface HistoryEntry {
   foods: FoodItem[];
   nutritionScore?: NutritionScore;
 }
+
+export interface SavedProduct {
+  id: string;
+  barcode?: string;              // ausente se cadastro manual
+  name: string;
+  brand?: string;
+  imageUrl?: string;
+  // SEMPRE por 100g — base canônica para qualquer cálculo de quantidade
+  nutritionPer100g: {
+    calories: number;
+    carbohydrates: number;
+    protein: number;
+    fat: number;
+    fiber: number;
+    sugar: number;
+    addedSugar: number;
+    sodium: number;
+    saturatedFat: number;
+  };
+  packageNetWeightGrams?: number;  // "pacote de 400g" — permite "comi o pacote todo"
+  unitWeightGrams?: number;        // peso de 1 unidade/porção, se conhecido
+  unitLabel?: string;              // "barra", "fatia", "unidade"
+  processingLevel: FoodItem['processingLevel'];
+  ingredientsText?: string;
+  allergens?: string[];
+  nutriScoreGrade?: string;
+  source: 'barcode' | 'manual';
+  createdAt: string;
+  lastUsedAt?: string;
+  useCount: number;
+}
+

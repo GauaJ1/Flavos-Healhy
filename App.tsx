@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { analyzeImage } from './services/geminiService';
-import type { AnalysisResult, NutritionalSummary, AnalysisMetadata } from './types';
+import type { AnalysisResult, NutritionalSummary, AnalysisMetadata, SavedProduct, FoodItem } from './types';
 import { useMealHistory } from './hooks/useMealHistory';
 import { useHealthSync } from './hooks/useHealthSync';
 import { useUserProfile } from './hooks/useUserProfile';
+import { useSavedProducts } from './hooks/useSavedProducts';
 import ImageUploader from './components/ImageUploader';
 import AnalysisView from './components/AnalysisView';
 import LoadingView from './components/LoadingView';
@@ -16,6 +17,9 @@ import HistoryView from './components/HistoryView';
 import CameraView from './components/CameraView';
 import { BarcodeScannerModal } from './components/BarcodeScannerModal';
 import { MealComparatorModal } from './components/MealComparatorModal';
+import { ProductsView } from './components/ProductsView';
+import { QuantityInputModal } from './components/QuantityInputModal';
+import { AddManualProductModal } from './components/AddManualProductModal';
 import { exportHistoryToCSV } from './services/pdfExportService';
 import { fetchProductByBarcode } from './services/barcodeService';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -28,8 +32,8 @@ import { CarbCycleReminderFlow } from './components/CarbCycleReminderFlow';
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
 
-type View = 'upload' | 'preview' | 'analysis' | 'history' | 'camera' | 'dashboard' | 'carbCycleReminder';
-type Tab = 'upload' | 'dashboard' | 'history';
+type View = 'upload' | 'preview' | 'analysis' | 'history' | 'camera' | 'dashboard' | 'carbCycleReminder' | 'products';
+type Tab = 'upload' | 'dashboard' | 'history' | 'products';
 
 const MAINTENANCE_DOMAINS: string[] = [];
 
@@ -57,6 +61,14 @@ const HistoryTabIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
+const ProductsTabIcon = ({ className }: { className?: string }) => (
+  <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round"
+      d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+  </svg>
+);
+
+
 // ── App ────────────────────────────────────────────────────────────────────────
 
 const App: React.FC = () => {
@@ -68,10 +80,15 @@ const App: React.FC = () => {
   const [showOnboarding, setShowOnboarding] = useState<boolean>(false);
   const [showBarcodeScanner, setShowBarcodeScanner] = useState<boolean>(false);
   const [showComparator, setShowComparator] = useState<boolean>(false);
+  const [showQuantityModal, setShowQuantityModal] = useState<boolean>(false);
+  const [showAddManualModal, setShowAddManualModal] = useState<boolean>(false);
+  const [selectedSavedProduct, setSelectedSavedProduct] = useState<SavedProduct | null>(null);
+
   const [view, setView] = useState<View>('upload');
   const [activeTab, setActiveTab] = useState<Tab>('upload');
 
   const { history, addHistoryEntry, removeHistoryEntry, updateHistoryEntry } = useMealHistory();
+  const savedProducts = useSavedProducts();
   const healthSync = useHealthSync();
   const { profile, targets, hasProfile, updateProfile } = useUserProfile();
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -82,50 +99,9 @@ const App: React.FC = () => {
     try {
       const res = await fetchProductByBarcode(barcode);
       if (res.found && res.product) {
-        const food = res.product;
-
-        // Constrói nutritionalSummary real a partir dos dados estruturados do Open Food Facts
-        // (mesma estrutura que a análise por foto usa — evita crash na AnalysisView)
-        const nutritionalSummary: NutritionalSummary = {
-          baseCalories: food.calories,
-          maxPossibleCalories: food.calories,
-          calorieDensity: classifyCalorieDensity(food.calories, food.estimatedWeightGrams),
-          satietyEstimate: food.fiber > 3 ? 'alta' : food.fiber > 1 ? 'media' : 'baixa',
-          possiblePositiveComponents: food.healthHighlights ?? [],
-          possibleAttentionPoints: food.attentionHighlights ?? [],
-          totalFiber: food.fiber ?? 0,
-          totalSugar: food.sugar ?? 0,
-          totalAddedSugar: food.addedSugar ?? 0,
-          totalSodium: food.sodium ?? 0,
-          totalSaturatedFat: food.saturatedFat ?? 0,
-        };
-
-        const analysisMetadata: AnalysisMetadata = {
-          isRealFood: true,
-          confidence: 'alta',       // dado vem de fonte estruturada (Open Food Facts)
-          isMixedDish: false,
-          isPackagedFood: true,
-          uncertaintyReasons: [],
-          requiresFollowUp: false,
-          followUpQuestions: [],
-        };
-
-        const result: AnalysisResult = {
-          analysisMetadata,
-          nutritionalSummary,
-          foods: [food],
-          hiddenIngredientsPossible: [],
-          feedback: `Produto identificado via código de barras (${barcode}).`,
-          advice: `Produto identificado via Código de Barras (${barcode}).`,
-          totalCalories: food.calories,
-          harmonyScore: food.processingLevel === 'ultraprocessado' ? 45 : 85,
-          inflammatoryClassification: food.processingLevel === 'ultraprocessado'
-            ? 'Moderadamente Inflamatório' : 'Anti-inflamatório',
-          suggestions: [],
-        };
-
-        setAnalysisResult(result);
-        setView('analysis');
+        const saved = savedProducts.upsertFromBarcode(res.sourceData, res.product);
+        setSelectedSavedProduct(saved);
+        setShowQuantityModal(true);
       } else {
         setError(res.errorMessage || `Produto (${barcode}) não encontrado no banco de dados.`);
       }
@@ -134,6 +110,52 @@ const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleQuantityConfirm = (foodItem: FoodItem, product: SavedProduct) => {
+    savedProducts.recordUsage(product.id);
+
+    const nutritionalSummary: NutritionalSummary = {
+      baseCalories: foodItem.calories,
+      maxPossibleCalories: foodItem.calories,
+      calorieDensity: classifyCalorieDensity(foodItem.calories, foodItem.estimatedWeightGrams),
+      satietyEstimate: foodItem.fiber > 3 ? 'alta' : foodItem.fiber > 1 ? 'media' : 'baixa',
+      possiblePositiveComponents: foodItem.healthHighlights ?? [],
+      possibleAttentionPoints: foodItem.attentionHighlights ?? [],
+      totalFiber: foodItem.fiber ?? 0,
+      totalSugar: foodItem.sugar ?? 0,
+      totalAddedSugar: foodItem.addedSugar ?? 0,
+      totalSodium: foodItem.sodium ?? 0,
+      totalSaturatedFat: foodItem.saturatedFat ?? 0,
+    };
+
+    const analysisMetadata: AnalysisMetadata = {
+      isRealFood: true,
+      confidence: 'alta',
+      isMixedDish: false,
+      isPackagedFood: true,
+      uncertaintyReasons: [],
+      requiresFollowUp: false,
+      followUpQuestions: [],
+    };
+
+    const result: AnalysisResult = {
+      analysisMetadata,
+      nutritionalSummary,
+      foods: [foodItem],
+      hiddenIngredientsPossible: [],
+      feedback: `Produto selecionado: ${foodItem.name}.`,
+      advice: `Produto adicionado (${foodItem.portionDescription}).`,
+      totalCalories: foodItem.calories,
+      harmonyScore: foodItem.processingLevel === 'ultraprocessado' ? 45 : 85,
+      inflammatoryClassification: foodItem.processingLevel === 'ultraprocessado'
+        ? 'Moderadamente Inflamatório' : 'Anti-inflamatório',
+      suggestions: [],
+    };
+
+    setAnalysisResult(result);
+    setShowQuantityModal(false);
+    setView('analysis');
   };
 
   /**
@@ -149,7 +171,6 @@ const App: React.FC = () => {
     const kcalPerG = calories / w;
     if (kcalPerG < 1.0) return 'baixa';
     if (kcalPerG < 2.5) return 'media';
-    return 'alta';
   }
 
   const handleExportPdf = () => {
@@ -243,6 +264,7 @@ const App: React.FC = () => {
     if (tab === 'upload') setView('upload');
     else if (tab === 'dashboard') setView('dashboard');
     else if (tab === 'history') setView('history');
+    else if (tab === 'products') setView('products');
     setError(null);
   }, []);
 
@@ -468,6 +490,24 @@ const App: React.FC = () => {
           </motion.div>
         );
 
+      // ── Products Library ──────────────────────────────────────────────────
+      case 'products':
+        return (
+          <motion.div key="products" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 20 }} className="w-full flex justify-center">
+            <ProductsView
+              products={savedProducts.list()}
+              onSelectProduct={(prod) => {
+                setSelectedSavedProduct(prod);
+                setShowQuantityModal(true);
+              }}
+              onRemoveProduct={savedProducts.removeProduct}
+              onOpenAddManual={() => setShowAddManualModal(true)}
+              onOpenBarcodeScanner={() => setShowBarcodeScanner(true)}
+            />
+          </motion.div>
+        );
+
       // ── Upload (default / home) ────────────────────────────────────────────
       case 'upload':
       default:
@@ -579,6 +619,25 @@ const App: React.FC = () => {
           onClose={() => setShowComparator(false)}
         />
       )}
+      {showQuantityModal && (
+        <QuantityInputModal
+          isOpen={showQuantityModal}
+          onClose={() => setShowQuantityModal(false)}
+          product={selectedSavedProduct}
+          onConfirm={handleQuantityConfirm}
+        />
+      )}
+      {showAddManualModal && (
+        <AddManualProductModal
+          isOpen={showAddManualModal}
+          onClose={() => setShowAddManualModal(false)}
+          onSave={(input) => {
+            savedProducts.addManual(input);
+            setToastMessage(`Produto "${input.name}" salvo com sucesso!`);
+            setTimeout(() => setToastMessage(null), 3000);
+          }}
+        />
+      )}
 
       {/* ── Header ── */}
       {!hideChrome && (
@@ -615,7 +674,7 @@ const App: React.FC = () => {
         </AnimatePresence>
       </main>
 
-      {/* ── Bottom navigation (3 tabs) ── */}
+      {/* ── Bottom navigation (4 tabs) ── */}
       {!hideChrome && !isLoading && (
         <footer className="bg-gray-900/80 backdrop-blur-lg shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.3)] w-full fixed bottom-0 z-20 border-t border-gray-800/50">
           <nav className="flex justify-around p-2 max-w-md mx-auto" aria-label="Navegação principal">
@@ -624,7 +683,7 @@ const App: React.FC = () => {
             <button
               id="tab-upload"
               onClick={() => goToTab('upload')}
-              className={`flex flex-col items-center gap-1 px-5 py-2 rounded-xl transition-all duration-300 ${
+              className={`flex flex-col items-center gap-1 px-4 py-2 rounded-xl transition-all duration-300 ${
                 activeTab === 'upload'
                   ? 'text-emerald-400 bg-emerald-900/20'
                   : 'text-gray-500 hover:text-gray-300'
@@ -636,11 +695,27 @@ const App: React.FC = () => {
               <span className="text-xs font-medium">Analisar</span>
             </button>
 
+            {/* Tab: Produtos */}
+            <button
+              id="tab-products"
+              onClick={() => goToTab('products')}
+              className={`flex flex-col items-center gap-1 px-4 py-2 rounded-xl transition-all duration-300 ${
+                activeTab === 'products'
+                  ? 'text-emerald-400 bg-emerald-900/20'
+                  : 'text-gray-500 hover:text-gray-300'
+              }`}
+              aria-label="Produtos salvos"
+              aria-selected={activeTab === 'products'}
+            >
+              <ProductsTabIcon className="w-6 h-6" />
+              <span className="text-xs font-medium">Produtos</span>
+            </button>
+
             {/* Tab: Hoje / Dashboard */}
             <button
               id="tab-dashboard"
               onClick={() => goToTab('dashboard')}
-              className={`flex flex-col items-center gap-1 px-5 py-2 rounded-xl transition-all duration-300 relative ${
+              className={`flex flex-col items-center gap-1 px-4 py-2 rounded-xl transition-all duration-300 relative ${
                 activeTab === 'dashboard'
                   ? 'text-emerald-400 bg-emerald-900/20'
                   : 'text-gray-500 hover:text-gray-300'
@@ -656,7 +731,7 @@ const App: React.FC = () => {
             <button
               id="tab-history"
               onClick={() => goToTab('history')}
-              className={`flex flex-col items-center gap-1 px-5 py-2 rounded-xl transition-all duration-300 ${
+              className={`flex flex-col items-center gap-1 px-4 py-2 rounded-xl transition-all duration-300 ${
                 activeTab === 'history'
                   ? 'text-emerald-400 bg-emerald-900/20'
                   : 'text-gray-500 hover:text-gray-300'
