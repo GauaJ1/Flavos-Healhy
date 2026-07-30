@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { analyzeImage } from './services/geminiService';
-import type { AnalysisResult } from './types';
+import type { AnalysisResult, NutritionalSummary, AnalysisMetadata } from './types';
 import { useMealHistory } from './hooks/useMealHistory';
 import { useHealthSync } from './hooks/useHealthSync';
 import { useUserProfile } from './hooks/useUserProfile';
@@ -82,13 +82,48 @@ const App: React.FC = () => {
     try {
       const res = await fetchProductByBarcode(barcode);
       if (res.found && res.product) {
-        const result: AnalysisResult = {
-          foods: [res.product],
-          totalCalories: res.product.calories,
-          advice: `Produto identificado via Código de Barras (${barcode}).`,
-          harmonyScore: res.product.processingLevel === 'ultraprocessado' ? 45 : 85,
-          inflammatoryClassification: res.product.processingLevel === 'ultraprocessado' ? 'Moderadamente Inflamatório' : 'Anti-inflamatório'
+        const food = res.product;
+
+        // Constrói nutritionalSummary real a partir dos dados estruturados do Open Food Facts
+        // (mesma estrutura que a análise por foto usa — evita crash na AnalysisView)
+        const nutritionalSummary: NutritionalSummary = {
+          baseCalories: food.calories,
+          maxPossibleCalories: food.calories,
+          calorieDensity: classifyCalorieDensity(food.calories, food.estimatedWeightGrams),
+          satietyEstimate: food.fiber > 3 ? 'alta' : food.fiber > 1 ? 'media' : 'baixa',
+          possiblePositiveComponents: food.healthHighlights ?? [],
+          possibleAttentionPoints: food.attentionHighlights ?? [],
+          totalFiber: food.fiber ?? 0,
+          totalSugar: food.sugar ?? 0,
+          totalAddedSugar: food.addedSugar ?? 0,
+          totalSodium: food.sodium ?? 0,
+          totalSaturatedFat: food.saturatedFat ?? 0,
         };
+
+        const analysisMetadata: AnalysisMetadata = {
+          isRealFood: true,
+          confidence: 'alta',       // dado vem de fonte estruturada (Open Food Facts)
+          isMixedDish: false,
+          isPackagedFood: true,
+          uncertaintyReasons: [],
+          requiresFollowUp: false,
+          followUpQuestions: [],
+        };
+
+        const result: AnalysisResult = {
+          analysisMetadata,
+          nutritionalSummary,
+          foods: [food],
+          hiddenIngredientsPossible: [],
+          feedback: `Produto identificado via código de barras (${barcode}).`,
+          advice: `Produto identificado via Código de Barras (${barcode}).`,
+          totalCalories: food.calories,
+          harmonyScore: food.processingLevel === 'ultraprocessado' ? 45 : 85,
+          inflammatoryClassification: food.processingLevel === 'ultraprocessado'
+            ? 'Moderadamente Inflamatório' : 'Anti-inflamatório',
+          suggestions: [],
+        };
+
         setAnalysisResult(result);
         setView('analysis');
       } else {
@@ -100,6 +135,22 @@ const App: React.FC = () => {
       setIsLoading(false);
     }
   };
+
+  /**
+   * Classifica a densidade calórica de um alimento (kcal/g).
+   * Limites: <1.0 kcal/g = baixa, 1.0–2.5 kcal/g = média, >2.5 kcal/g = alta.
+   * Alinha com a descrição do campo calorieDensity no schema do geminiService.
+   */
+  function classifyCalorieDensity(
+    calories: number,
+    weightGrams: number
+  ): 'baixa' | 'media' | 'alta' {
+    const w = weightGrams > 0 ? weightGrams : 100;
+    const kcalPerG = calories / w;
+    if (kcalPerG < 1.0) return 'baixa';
+    if (kcalPerG < 2.5) return 'media';
+    return 'alta';
+  }
 
   const handleExportPdf = () => {
     exportHistoryToCSV(history);

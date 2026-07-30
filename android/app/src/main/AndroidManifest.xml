@@ -12,6 +12,7 @@
     <!-- Leitura Saúde 360° (Big Update v5.0) -->
     <uses-permission android:name="android.permission.health.READ_SLEEP" />
     <uses-permission android:name="android.permission.health.READ_EXERCISE" />
+    <uses-permission android:name="android.permission.health.READ_ACTIVE_CALORIES_BURNED" />
     <!-- READ_HEART_RATE omitido intencionalmente até ter implementação ativa
          (menos permissões pedidas = maior taxa de opt-in dos usuários) -->
 
