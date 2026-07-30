@@ -80,15 +80,22 @@ export const Health360Card: React.FC<Health360CardProps> = ({
 
   const sleepHours = hasSleep ? (sleepState!.durationMinutes! / 60) : null;
   const stepCount = activityState?.steps || 0;
-  const activeKcal = activityState?.activeCaloriesBurned || 0;
+  const activeKcalMeasured = activityState?.activeCaloriesBurned || 0;
+
+  // Estimativa biomecânica de calorias ativas dos passos (média científica: ~0.045 kcal por passo)
+  const activeKcalEstimated = stepCount > 0 ? Math.round(stepCount * 0.045) : 0;
+
+  // Usa calorias ativas medidas pelo Health Connect; se zeradas, usa estimativa dos passos
+  const activeKcal = activeKcalMeasured > 0 ? activeKcalMeasured : activeKcalEstimated;
+  const isEstimated = activeKcalMeasured === 0 && activeKcalEstimated > 0;
 
   const harmony = calculateHarmonyScore(nutritionScore, sleepHours, stepCount);
 
-  // Balanço Energético (Passo 7)
+  // Balanço Energético
   const totalSpent = Math.round(effectiveTargetKcal + activeKcal);
   const balance = totalSpent - dailyCaloriesConsumed;
 
-  // Nutrição x Recuperação (Passo 5)
+  // Nutrição x Recuperação
   const hasWorkoutOrActive = Boolean(activityState?.hasWorkout || activeKcal >= 150);
   const proteinPct = targetProtein > 0 ? (todayProteinConsumed / targetProtein) * 100 : 100;
   const showRecoveryInsight = hasWorkoutOrActive && proteinPct < 70;
@@ -137,27 +144,37 @@ export const Health360Card: React.FC<Health360CardProps> = ({
             {stepCount > 0 ? stepCount.toLocaleString('pt-BR') : '--'}
           </span>
         </div>
-        <div className="bg-gray-800/60 border border-gray-700/40 rounded-xl p-2 text-center">
+        <div className="bg-gray-800/60 border border-gray-700/40 rounded-xl p-2 text-center" title="Calorias queimadas em treinos e caminhadas">
           <span className="text-[10px] text-gray-500 block">Ativas</span>
           <span className="text-xs font-bold text-amber-300">
             {activeKcal > 0 ? `${activeKcal} kcal` : '--'}
           </span>
+          {isEstimated && (
+            <span className="text-[8px] text-amber-400/70 block">estimado</span>
+          )}
         </div>
       </div>
 
-      {/* Balanço Energético (Passo 7) */}
+      {/* Balanço Energético */}
       <div className="bg-gray-950/40 border border-gray-800 rounded-xl p-2.5 text-xs text-gray-300 mb-2">
-        <p className="leading-relaxed">
-          ⚡ Hoje seu gasto total foi de <strong>~{totalSpent} kcal</strong> ({effectiveTargetKcal} kcal base + {activeKcal} kcal ativas) e você consumiu <strong>{dailyCaloriesConsumed} kcal</strong> — saldo de <strong>{balance > 0 ? 'déficit' : 'superávit'}</strong> de <strong>{Math.abs(balance)} kcal</strong>.
-        </p>
+        {dailyCaloriesConsumed === 0 ? (
+          <p className="leading-relaxed">
+            ⚡ Seu gasto diário estimado é de <strong>~{totalSpent} kcal</strong> ({effectiveTargetKcal} kcal base + {activeKcal} kcal ativas). Registre suas refeições hoje para calcular seu balanço calórico.
+          </p>
+        ) : (
+          <p className="leading-relaxed">
+            ⚡ Hoje seu gasto total estimado é de <strong>~{totalSpent} kcal</strong> ({effectiveTargetKcal} kcal base + {activeKcal} kcal ativas) e você consumiu <strong>{dailyCaloriesConsumed} kcal</strong> — saldo de <strong>{balance > 0 ? 'déficit' : 'superávit'}</strong> de <strong>{Math.abs(balance)} kcal</strong>.
+          </p>
+        )}
       </div>
 
-      {/* Insight de Recuperação (Passo 5) */}
+      {/* Insight de Recuperação */}
       {showRecoveryInsight && (
         <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-2.5 text-xs text-amber-200">
-          💪 Você teve um treino hoje ({activeKcal} kcal ativas) e está em {Math.round(proteinPct)}% da sua meta de proteína ({todayProteinConsumed}g / {targetProtein}g). Uma fonte extra de proteína ajuda a otimizar a recuperação pós-treino.
+          💪 Você teve atividade física hoje ({activeKcal} kcal ativas) e atingiu {Math.round(proteinPct)}% da sua meta de proteína ({todayProteinConsumed}g / {targetProtein}g). Uma fonte extra de proteína otimiza sua recuperação muscular.
         </div>
       )}
     </motion.div>
   );
 };
+
