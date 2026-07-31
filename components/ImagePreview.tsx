@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { XMarkIcon, SparklesIcon } from './icons';
 import type { SavedProduct } from '../types';
@@ -29,7 +29,14 @@ const ImagePreview: React.FC<ImagePreviewProps> = ({
   const [selectedProducts, setSelectedProducts] = useState<SelectedProductEntry[]>([]);
   const [editingGrams, setEditingGrams] = useState<{ [id: string]: string }>({});
 
-  const imageUrl = URL.createObjectURL(imageFile);
+  // Memoizar imageUrl para evitar recriar o blob a cada re-render
+  // e revogar quando o componente desmontar (evita memory leak)
+  const imageUrl = useMemo(() => URL.createObjectURL(imageFile), [imageFile]);
+  useEffect(() => {
+    return () => {
+      URL.revokeObjectURL(imageUrl);
+    };
+  }, [imageUrl]);
 
   const handleClose = () => {
     if (onBack) onBack();

@@ -171,6 +171,7 @@ const App: React.FC = () => {
     const kcalPerG = calories / w;
     if (kcalPerG < 1.0) return 'baixa';
     if (kcalPerG < 2.5) return 'media';
+    return 'alta'; // ≥ 2.5 kcal/g: alimentos hipercalóricos (chocolate, oleos, etc.)
   }
 
   const handleExportPdf = () => {
