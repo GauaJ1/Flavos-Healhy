@@ -58,76 +58,78 @@ export function useSavedProducts() {
         saturatedFat: Math.round(((foodItem.saturatedFat || 0) / factor) * 10) / 10,
       };
 
-      let resultProduct: SavedProduct | null = null;
+      const now = new Date().toISOString();
 
+      // ── Padrão correto: calcular o produto de forma síncrona ANTES de chamar
+      // setProducts, eliminando a variável mutável em closure. Depois o setProducts
+      // apenas aplica o resultado pré-calculado usando `prev` (estado mais recente).
+      const existing = products.find((p) => p.barcode && p.barcode === barcode);
+
+      let resultProduct: SavedProduct;
+
+      if (existing) {
+        const isCorrected = existing.manuallyCorrected === true;
+        resultProduct = {
+          ...existing,
+          name: sourceData?.name || foodItem.name || existing.name,
+          brand: sourceData?.brand || existing.brand,
+          imageUrl: sourceData?.imageUrl || existing.imageUrl,
+          nutritionPer100g: isCorrected ? existing.nutritionPer100g : nutritionPer100g,
+          packageNetWeightGrams: sourceData?.packageNetWeightGrams ?? existing.packageNetWeightGrams,
+          unitWeightGrams: sourceData?.unitWeightGrams ?? existing.unitWeightGrams,
+          unitLabel: sourceData?.unitLabel || existing.unitLabel,
+          processingLevel: foodItem.processingLevel || existing.processingLevel,
+          ingredientsText: sourceData?.ingredientsText || existing.ingredientsText,
+          allergens: sourceData?.allergens || existing.allergens,
+          nutriScoreGrade: sourceData?.nutriScoreGrade || existing.nutriScoreGrade,
+          dataQualityWarning: isCorrected ? undefined : (sourceData?.dataQualityWarning || existing.dataQualityWarning),
+          manuallyCorrected: isCorrected,
+        };
+      } else {
+        resultProduct = {
+          id: `prod_ean_${barcode}_${Date.now()}`,
+          barcode,
+          name: sourceData?.name || foodItem.name,
+          brand: sourceData?.brand,
+          imageUrl: sourceData?.imageUrl,
+          nutritionPer100g,
+          packageNetWeightGrams: sourceData?.packageNetWeightGrams,
+          unitWeightGrams: sourceData?.unitWeightGrams,
+          unitLabel: sourceData?.unitLabel,
+          processingLevel: foodItem.processingLevel,
+          ingredientsText: sourceData?.ingredientsText,
+          allergens: sourceData?.allergens,
+          nutriScoreGrade: sourceData?.nutriScoreGrade,
+          source: 'barcode',
+          createdAt: now,
+          useCount: 0,
+          dataQualityWarning: sourceData?.dataQualityWarning,
+          manuallyCorrected: false,
+        };
+      }
+
+      // Aplicar o produto pré-calculado no estado (usando `prev` para garantir
+      // que trabalhamos sempre com o estado mais recente, mesmo sob batching)
       setProducts((prev) => {
         const existingIndex = prev.findIndex((p) => p.barcode && p.barcode === barcode);
-        const now = new Date().toISOString();
-
+        let newList: SavedProduct[];
         if (existingIndex >= 0) {
-          const existing = prev[existingIndex];
-          // Se o usuário corrigiu manualmente os dados antes, preserva a tabela corrigida e a marcação!
-          const isCorrected = existing.manuallyCorrected === true;
-          const updated: SavedProduct = {
-            ...existing,
-            name: sourceData?.name || foodItem.name || existing.name,
-            brand: sourceData?.brand || existing.brand,
-            imageUrl: sourceData?.imageUrl || existing.imageUrl,
-            nutritionPer100g: isCorrected ? existing.nutritionPer100g : nutritionPer100g,
-            packageNetWeightGrams: sourceData?.packageNetWeightGrams ?? existing.packageNetWeightGrams,
-            unitWeightGrams: sourceData?.unitWeightGrams ?? existing.unitWeightGrams,
-            unitLabel: sourceData?.unitLabel || existing.unitLabel,
-            processingLevel: foodItem.processingLevel || existing.processingLevel,
-            ingredientsText: sourceData?.ingredientsText || existing.ingredientsText,
-            allergens: sourceData?.allergens || existing.allergens,
-            nutriScoreGrade: sourceData?.nutriScoreGrade || existing.nutriScoreGrade,
-            dataQualityWarning: isCorrected ? undefined : (sourceData?.dataQualityWarning || existing.dataQualityWarning),
-            manuallyCorrected: isCorrected,
-          };
-          resultProduct = updated;
-          const newList = [...prev];
-          newList[existingIndex] = updated;
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(newList));
-          } catch (e) {
-            console.error(e);
-          }
-          return newList;
+          newList = [...prev];
+          newList[existingIndex] = resultProduct;
         } else {
-          const newProd: SavedProduct = {
-            id: `prod_ean_${barcode}_${Date.now()}`,
-            barcode,
-            name: sourceData?.name || foodItem.name,
-            brand: sourceData?.brand,
-            imageUrl: sourceData?.imageUrl,
-            nutritionPer100g,
-            packageNetWeightGrams: sourceData?.packageNetWeightGrams,
-            unitWeightGrams: sourceData?.unitWeightGrams,
-            unitLabel: sourceData?.unitLabel,
-            processingLevel: foodItem.processingLevel,
-            ingredientsText: sourceData?.ingredientsText,
-            allergens: sourceData?.allergens,
-            nutriScoreGrade: sourceData?.nutriScoreGrade,
-            source: 'barcode',
-            createdAt: now,
-            useCount: 0,
-            dataQualityWarning: sourceData?.dataQualityWarning,
-            manuallyCorrected: false,
-          };
-          resultProduct = newProd;
-          const newList = [newProd, ...prev];
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(newList));
-          } catch (e) {
-            console.error(e);
-          }
-          return newList;
+          newList = [resultProduct, ...prev];
         }
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(newList));
+        } catch (e) {
+          console.error(e);
+        }
+        return newList;
       });
 
-      return resultProduct!;
+      return resultProduct;
     },
-    []
+    [products] // depende de `products` para ler o estado atual ao calcular o resultado
   );
 
   const addManual = useCallback((input: ManualProductInput): SavedProduct => {
