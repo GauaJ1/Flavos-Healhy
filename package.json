@@ -8,7 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "export:taco": "node scripts/generate-sitemap.js",
     "rebuild:taco": "node scripts/parse-taco-excel.mjs && node scripts/merge-ibge-database.mjs && node scripts/generate-sitemap.js",
-    "build:seo": "npm run export:taco && npm run build --prefix packages/alimentos-seo",
+    "build:seo": "npm run export:taco && npm install --prefix packages/alimentos-seo && npm run build --prefix packages/alimentos-seo",
     "build:all": "npm run build && npm run build:seo && node -e \"fs.cpSync('packages/alimentos-seo/dist', 'dist/alimentos', {recursive: true})\"",
     "build:vercel": "npm run build:all",
     "preview": "vite preview",
