@@ -66,12 +66,14 @@ export function useSavedProducts() {
 
         if (existingIndex >= 0) {
           const existing = prev[existingIndex];
+          // Se o usuário corrigiu manualmente os dados antes, preserva a tabela corrigida e a marcação!
+          const isCorrected = existing.manuallyCorrected === true;
           const updated: SavedProduct = {
             ...existing,
             name: sourceData?.name || foodItem.name || existing.name,
             brand: sourceData?.brand || existing.brand,
             imageUrl: sourceData?.imageUrl || existing.imageUrl,
-            nutritionPer100g,
+            nutritionPer100g: isCorrected ? existing.nutritionPer100g : nutritionPer100g,
             packageNetWeightGrams: sourceData?.packageNetWeightGrams ?? existing.packageNetWeightGrams,
             unitWeightGrams: sourceData?.unitWeightGrams ?? existing.unitWeightGrams,
             unitLabel: sourceData?.unitLabel || existing.unitLabel,
@@ -79,6 +81,8 @@ export function useSavedProducts() {
             ingredientsText: sourceData?.ingredientsText || existing.ingredientsText,
             allergens: sourceData?.allergens || existing.allergens,
             nutriScoreGrade: sourceData?.nutriScoreGrade || existing.nutriScoreGrade,
+            dataQualityWarning: isCorrected ? undefined : (sourceData?.dataQualityWarning || existing.dataQualityWarning),
+            manuallyCorrected: isCorrected,
           };
           resultProduct = updated;
           const newList = [...prev];
@@ -107,6 +111,8 @@ export function useSavedProducts() {
             source: 'barcode',
             createdAt: now,
             useCount: 0,
+            dataQualityWarning: sourceData?.dataQualityWarning,
+            manuallyCorrected: false,
           };
           resultProduct = newProd;
           const newList = [newProd, ...prev];
@@ -189,6 +195,35 @@ export function useSavedProducts() {
     });
   }, []);
 
+  const updateProductNutrition = useCallback(
+    (id: string, newNutritionPer100g: SavedProduct['nutritionPer100g']): SavedProduct | null => {
+      let updatedProd: SavedProduct | null = null;
+      setProducts((prev) => {
+        const newList = prev.map((p) => {
+          if (p.id === id) {
+            const updated: SavedProduct = {
+              ...p,
+              nutritionPer100g: newNutritionPer100g,
+              manuallyCorrected: true,
+              dataQualityWarning: undefined,
+            };
+            updatedProd = updated;
+            return updated;
+          }
+          return p;
+        });
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(newList));
+        } catch (e) {
+          console.error(e);
+        }
+        return newList;
+      });
+      return updatedProd;
+    },
+    []
+  );
+
   const list = useCallback(() => {
     return [...products].sort((a, b) => {
       const timeA = a.lastUsedAt ? new Date(a.lastUsedAt).getTime() : new Date(a.createdAt).getTime();
@@ -203,6 +238,7 @@ export function useSavedProducts() {
     addManual,
     removeProduct,
     recordUsage,
+    updateProductNutrition,
     list,
   };
 }

@@ -280,6 +280,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
           <Health360Card
             isSyncEnabled={isSyncEnabled}
             nutritionScore={todayNutritionScore}
+            effectiveTDEE={effectiveTDEE}
             effectiveTargetKcal={todayGoals.calories}
             dailyCaloriesConsumed={macros.calories}
             todayProteinConsumed={macros.protein}

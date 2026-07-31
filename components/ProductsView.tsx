@@ -218,8 +218,18 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
                     {p.brand ? `${p.brand} • ` : ''}
                     {p.nutritionPer100g.calories} kcal/100g
                   </p>
-                  <div className="flex items-center gap-2 mt-1">
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
                     {getProcessingBadge(p.processingLevel)}
+                    {p.manuallyCorrected && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-0.5">
+                        ✅ Verificado por você
+                      </span>
+                    )}
+                    {!p.manuallyCorrected && p.dataQualityWarning && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center gap-0.5">
+                        ⚠️ Dados externos
+                      </span>
+                    )}
                     {p.useCount > 0 && (
                       <span className="text-[10px] text-gray-500 font-medium">
                         usado {p.useCount}x

@@ -382,7 +382,13 @@ const App: React.FC = () => {
           <motion.div key="preview" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 1.05 }} className="w-full flex flex-col items-center justify-center flex-grow">
             {selectedImage && (
-              <ImagePreview imageFile={selectedImage} onBack={() => setView('upload')} onAnalyze={handleConfirmAnalysis} />
+              <ImagePreview
+                imageFile={selectedImage}
+                onBack={() => setView('upload')}
+                onCancel={() => setView('upload')}
+                onAnalyze={handleConfirmAnalysis}
+                savedProducts={savedProducts.list()}
+              />
             )}
           </motion.div>
         );
@@ -625,6 +631,10 @@ const App: React.FC = () => {
           onClose={() => setShowQuantityModal(false)}
           product={selectedSavedProduct}
           onConfirm={handleQuantityConfirm}
+          onUpdateNutrition={(productId, nutrition) => {
+            savedProducts.updateProductNutrition(productId, nutrition);
+            return null;
+          }}
         />
       )}
       {showAddManualModal && (

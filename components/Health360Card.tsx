@@ -6,7 +6,8 @@ import { readSleepData, readActivityData } from '../services/healthSyncService';
 interface Health360CardProps {
   isSyncEnabled: boolean;
   nutritionScore: number;
-  effectiveTargetKcal?: number;
+  effectiveTDEE?: number;           // TDEE puro (sem ajuste de objetivo)
+  effectiveTargetKcal?: number;     // Meta de ingestão (TDEE + delta objetivo)
   dailyCaloriesConsumed?: number;
   todayProteinConsumed?: number;
   targetProtein?: number;
@@ -30,6 +31,7 @@ interface SleepState {
 export const Health360Card: React.FC<Health360CardProps> = ({
   isSyncEnabled,
   nutritionScore,
+  effectiveTDEE = 2000,
   effectiveTargetKcal = 2000,
   dailyCaloriesConsumed = 0,
   todayProteinConsumed = 0,
@@ -92,7 +94,10 @@ export const Health360Card: React.FC<Health360CardProps> = ({
   const harmony = calculateHarmonyScore(nutritionScore, sleepHours, stepCount);
 
   // Balanço Energético
-  const totalSpent = Math.round(effectiveTargetKcal + activeKcal);
+  // TDEE já inclui o fator de atividade do perfil — NÃO somar activeKcal (seria dupla contagem).
+  // activeKcal do Health Connect é exibido como métrica informativa (coluna "Ativas"),
+  // não como componente adicional do gasto.
+  const totalSpent = effectiveTDEE;  // gasto = TDEE do perfil
   const balance = totalSpent - dailyCaloriesConsumed;
 
   // Nutrição x Recuperação
@@ -159,11 +164,11 @@ export const Health360Card: React.FC<Health360CardProps> = ({
       <div className="bg-gray-950/40 border border-gray-800 rounded-xl p-2.5 text-xs text-gray-300 mb-2">
         {dailyCaloriesConsumed === 0 ? (
           <p className="leading-relaxed">
-            ⚡ Seu gasto diário estimado é de <strong>~{totalSpent} kcal</strong> ({effectiveTargetKcal} kcal base + {activeKcal} kcal ativas). Registre suas refeições hoje para calcular seu balanço calórico.
+            ⚡ Seu TDEE estimado é de <strong>~{totalSpent} kcal</strong> (meta de ingestão: {effectiveTargetKcal} kcal). Registre suas refeições para calcular o balanço calórico.
           </p>
         ) : (
           <p className="leading-relaxed">
-            ⚡ Hoje seu gasto total estimado é de <strong>~{totalSpent} kcal</strong> ({effectiveTargetKcal} kcal base + {activeKcal} kcal ativas) e você consumiu <strong>{dailyCaloriesConsumed} kcal</strong> — saldo de <strong>{balance > 0 ? 'déficit' : 'superávit'}</strong> de <strong>{Math.abs(balance)} kcal</strong>.
+            ⚡ Seu TDEE é <strong>~{totalSpent} kcal</strong> e você consumiu <strong>{dailyCaloriesConsumed} kcal</strong> — saldo de <strong>{balance > 0 ? 'déficit' : 'superávit'}</strong> de <strong>{Math.abs(balance)} kcal</strong> em relação ao gasto.
           </p>
         )}
       </div>

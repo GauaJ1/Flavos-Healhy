@@ -25,6 +25,7 @@ export interface SavedProductSource {
   allergens?: string[];
   nutriScoreGrade?: string;
   novaGroup?: number;
+  dataQualityWarning?: string;     // NOVO — aviso de inconsistência nos dados
 }
 
 export interface BarcodeProductResult {
@@ -33,6 +34,26 @@ export interface BarcodeProductResult {
   barcode?: string;
   errorMessage?: string;
   sourceData?: SavedProductSource;  // NOVO — dados expandidos para a biblioteca
+  dataQualityWarning?: string;     // NOVO — aviso de inconsistência nutricional
+}
+
+/**
+ * Checa a consistência interna da tabela nutricional usando os fatores Atwater (4-4-9).
+ * Tolerância de 15% para variação aceitável de arredondamentos de rótulo.
+ */
+export function checkAtwaterConsistency(
+  calories: number,
+  carbs: number,
+  protein: number,
+  fat: number
+): { consistent: boolean; expectedCalories: number; deviationPercent: number } {
+  const expected = carbs * 4 + protein * 4 + fat * 9;
+  const deviation = expected > 0 ? Math.abs(calories - expected) / expected : 0;
+  return {
+    consistent: deviation <= 0.15, // 15% de tolerância
+    expectedCalories: Math.round(expected),
+    deviationPercent: Math.round(deviation * 100),
+  };
 }
 
 /**
@@ -174,6 +195,12 @@ export async function fetchProductByBarcode(barcode: string): Promise<BarcodePro
       possibleIndustrializedSauces: false,
     };
 
+    // Sanity check Atwater (Fase 1.1)
+    const atwater = checkAtwaterConsistency(kcal100, carbs100, prot100, fat100);
+    const dataQualityWarning = !atwater.consistent && (kcal100 > 0 || atwater.expectedCalories > 0)
+      ? 'Os valores deste produto podem estar desatualizados na base Open Food Facts — confira o rótulo da embalagem antes de confirmar.'
+      : undefined;
+
     // Dados expandidos para a biblioteca de produtos salvos
     const sourceData: SavedProductSource = {
       barcode: cleanBarcode,
@@ -187,6 +214,7 @@ export async function fetchProductByBarcode(barcode: string): Promise<BarcodePro
       allergens: parseAllergens(p.allergens_tags),
       nutriScoreGrade: p.nutriscore_grade || undefined,
       novaGroup: Number(p.nova_group ?? p.nova_groups) || undefined,
+      dataQualityWarning,
     };
 
     return {
@@ -194,6 +222,7 @@ export async function fetchProductByBarcode(barcode: string): Promise<BarcodePro
       product: foodItem,
       barcode: cleanBarcode,
       sourceData,
+      dataQualityWarning,
     };
   } catch (error) {
     const msg = error instanceof Error ? error.message : 'Erro de rede';

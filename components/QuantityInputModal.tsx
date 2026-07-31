@@ -54,6 +54,7 @@ interface QuantityInputModalProps {
   onClose: () => void;
   product: SavedProduct | null;
   onConfirm: (foodItem: FoodItem, product: SavedProduct) => void;
+  onUpdateNutrition?: (productId: string, updatedNutrition: SavedProduct['nutritionPer100g']) => SavedProduct | null;
 }
 
 export const QuantityInputModal: React.FC<QuantityInputModalProps> = ({
@@ -61,6 +62,7 @@ export const QuantityInputModal: React.FC<QuantityInputModalProps> = ({
   onClose,
   product,
   onConfirm,
+  onUpdateNutrition,
 }) => {
   if (!isOpen || !product) return null;
 
@@ -68,28 +70,92 @@ export const QuantityInputModal: React.FC<QuantityInputModalProps> = ({
   const [mode, setMode] = useState<'grams' | 'units'>(hasUnit ? 'units' : 'grams');
   const [quantity, setQuantity] = useState<number>(hasUnit ? 1 : (product.packageNetWeightGrams || 100));
 
-  const previewFood = calcFoodItemFromQuantity(product, quantity || 0, mode);
+  // Estado para edição inline de macros por 100g (PASSO 2)
+  const [isEditingMacros, setIsEditingMacros] = useState<boolean>(Boolean(product.dataQualityWarning && !product.manuallyCorrected));
+  const [editCalories, setEditCalories] = useState<string>(String(product.nutritionPer100g.calories));
+  const [editCarbs, setEditCarbs] = useState<string>(String(product.nutritionPer100g.carbohydrates));
+  const [editProtein, setEditProtein] = useState<string>(String(product.nutritionPer100g.protein));
+  const [editFat, setEditFat] = useState<string>(String(product.nutritionPer100g.fat));
+  const [editFiber, setEditFiber] = useState<string>(String(product.nutritionPer100g.fiber));
+
+  const [currentProduct, setCurrentProduct] = useState<SavedProduct>(product);
+
+  const previewFood = calcFoodItemFromQuantity(currentProduct, quantity || 0, mode);
+
+  const handleApplyMacroEdit = () => {
+    const kcal = parseFloat(editCalories);
+    if (isNaN(kcal) || kcal < 0) return;
+
+    const newNutrition: SavedProduct['nutritionPer100g'] = {
+      ...currentProduct.nutritionPer100g,
+      calories: kcal,
+      carbohydrates: Math.max(0, parseFloat(editCarbs) || 0),
+      protein: Math.max(0, parseFloat(editProtein) || 0),
+      fat: Math.max(0, parseFloat(editFat) || 0),
+      fiber: Math.max(0, parseFloat(editFiber) || 0),
+    };
+
+    const updated: SavedProduct = {
+      ...currentProduct,
+      nutritionPer100g: newNutrition,
+      manuallyCorrected: true,
+      dataQualityWarning: undefined,
+    };
+
+    setCurrentProduct(updated);
+    if (onUpdateNutrition) {
+      onUpdateNutrition(product.id, newNutrition);
+    }
+    setIsEditingMacros(false);
+  };
 
   const handleConfirm = () => {
     if (!quantity || quantity <= 0) return;
-    onConfirm(previewFood, product);
+
+    let finalProduct = currentProduct;
+    // Se estava editando no momento de confirmar, aplica as alterações primeiro
+    if (isEditingMacros) {
+      const kcal = parseFloat(editCalories);
+      if (!isNaN(kcal) && kcal >= 0) {
+        const newNutrition: SavedProduct['nutritionPer100g'] = {
+          ...currentProduct.nutritionPer100g,
+          calories: kcal,
+          carbohydrates: Math.max(0, parseFloat(editCarbs) || 0),
+          protein: Math.max(0, parseFloat(editProtein) || 0),
+          fat: Math.max(0, parseFloat(editFat) || 0),
+          fiber: Math.max(0, parseFloat(editFiber) || 0),
+        };
+        finalProduct = {
+          ...currentProduct,
+          nutritionPer100g: newNutrition,
+          manuallyCorrected: true,
+          dataQualityWarning: undefined,
+        };
+        if (onUpdateNutrition) {
+          onUpdateNutrition(product.id, newNutrition);
+        }
+      }
+    }
+
+    const finalFoodItem = calcFoodItemFromQuantity(finalProduct, quantity, mode);
+    onConfirm(finalFoodItem, finalProduct);
   };
 
   const handlePackageShortcut = () => {
-    if (product.packageNetWeightGrams) {
+    if (currentProduct.packageNetWeightGrams) {
       setMode('grams');
-      setQuantity(product.packageNetWeightGrams);
+      setQuantity(currentProduct.packageNetWeightGrams);
     }
   };
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm overflow-y-auto">
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.95 }}
-          className="bg-gray-900 border border-gray-800 rounded-3xl p-6 w-full max-w-md shadow-2xl text-white flex flex-col gap-5"
+          className="bg-gray-900 border border-gray-800 rounded-3xl p-6 w-full max-w-md shadow-2xl text-white flex flex-col gap-4 my-6"
         >
           {/* Header */}
           <div className="flex items-start justify-between">
@@ -97,8 +163,8 @@ export const QuantityInputModal: React.FC<QuantityInputModalProps> = ({
               <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                 Definir Quantidade
               </span>
-              <h3 className="text-lg font-bold text-white mt-1 leading-tight">{product.name}</h3>
-              {product.brand && <p className="text-xs text-gray-400">{product.brand}</p>}
+              <h3 className="text-lg font-bold text-white mt-1 leading-tight">{currentProduct.name}</h3>
+              {currentProduct.brand && <p className="text-xs text-gray-400">{currentProduct.brand}</p>}
             </div>
             <button
               onClick={onClose}
@@ -107,6 +173,115 @@ export const QuantityInputModal: React.FC<QuantityInputModalProps> = ({
               ✕
             </button>
           </div>
+
+          {/* Banner de Aviso de Qualidade (PASSO 2) */}
+          {currentProduct.dataQualityWarning && !currentProduct.manuallyCorrected && (
+            <div className="bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs p-3 rounded-2xl flex flex-col gap-2">
+              <div className="flex items-start gap-2">
+                <span className="text-base">⚠️</span>
+                <p className="leading-relaxed">
+                  Os dados deste produto podem estar incompletos ou desatualizados na base pública. Você pode ajustar os valores abaixo antes de salvar.
+                </p>
+              </div>
+              {!isEditingMacros && (
+                <button
+                  type="button"
+                  onClick={() => setIsEditingMacros(true)}
+                  className="self-start text-[11px] font-bold text-amber-400 bg-amber-500/20 hover:bg-amber-500/30 px-3 py-1 rounded-lg transition-colors"
+                >
+                  ✍️ Corrigir Valores (100g)
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Painel Inline de Edição de Macros por 100g */}
+          {isEditingMacros ? (
+            <div className="bg-gray-800/60 p-4 rounded-2xl border border-amber-500/30 flex flex-col gap-3">
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-bold text-amber-400">Ajustar Tabela Nutricional (POR 100g)</span>
+                <button
+                  type="button"
+                  onClick={() => setIsEditingMacros(false)}
+                  className="text-xs text-gray-400 hover:text-white"
+                >
+                  Cancelar
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="text-[10px] text-gray-400 block">Calorias (kcal)</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={editCalories}
+                    onChange={(e) => setEditCalories(e.target.value)}
+                    className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-gray-400 block">Carboidratos (g)</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={editCarbs}
+                    onChange={(e) => setEditCarbs(e.target.value)}
+                    className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-gray-400 block">Proteínas (g)</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={editProtein}
+                    onChange={(e) => setEditProtein(e.target.value)}
+                    className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-gray-400 block">Gorduras (g)</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={editFat}
+                    onChange={(e) => setEditFat(e.target.value)}
+                    className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-gray-400 block">Fibras (g)</label>
+                  <input
+                    type="number"
+                    step="any"
+                    value={editFiber}
+                    onChange={(e) => setEditFiber(e.target.value)}
+                    className="w-full bg-gray-900 border border-gray-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleApplyMacroEdit}
+                className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs transition-colors mt-1"
+              >
+                Salvar Correção Permanente
+              </button>
+            </div>
+          ) : (
+            <div className="flex justify-between items-center text-xs text-gray-400 px-1">
+              <span>Base: {currentProduct.nutritionPer100g.calories} kcal / 100g</span>
+              <button
+                type="button"
+                onClick={() => setIsEditingMacros(true)}
+                className="text-emerald-400 hover:underline text-[11px] font-medium"
+              >
+                ✏️ Editar valores (100g)
+              </button>
+            </div>
+          )}
 
           {/* Mode Switcher */}
           {hasUnit && (
@@ -123,13 +298,13 @@ export const QuantityInputModal: React.FC<QuantityInputModalProps> = ({
                     : 'text-gray-400 hover:text-white'
                 }`}
               >
-                Unidades ({product.unitLabel || 'unid.'})
+                Unidades ({currentProduct.unitLabel || 'unid.'})
               </button>
               <button
                 type="button"
                 onClick={() => {
                   setMode('grams');
-                  setQuantity(product.unitWeightGrams || 100);
+                  setQuantity(currentProduct.unitWeightGrams || 100);
                 }}
                 className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
                   mode === 'grams'
@@ -161,7 +336,7 @@ export const QuantityInputModal: React.FC<QuantityInputModalProps> = ({
                   className="w-24 text-center text-3xl font-black bg-transparent text-white border-b-2 border-emerald-500 focus:outline-none"
                 />
                 <span className="text-sm font-semibold text-gray-400">
-                  {mode === 'units' ? (product.unitLabel || 'unid.') : 'g'}
+                  {mode === 'units' ? (currentProduct.unitLabel || 'unid.') : 'g'}
                 </span>
               </div>
               <button
@@ -174,13 +349,13 @@ export const QuantityInputModal: React.FC<QuantityInputModalProps> = ({
             </div>
 
             {/* Shortcut Package */}
-            {product.packageNetWeightGrams && product.packageNetWeightGrams > 0 && (
+            {currentProduct.packageNetWeightGrams && currentProduct.packageNetWeightGrams > 0 && (
               <button
                 type="button"
                 onClick={handlePackageShortcut}
                 className="text-xs text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 px-3 py-1.5 rounded-full font-medium transition-colors"
               >
-                Comi o pacote inteiro ({product.packageNetWeightGrams}g)
+                Comi o pacote inteiro ({currentProduct.packageNetWeightGrams}g)
               </button>
             )}
           </div>

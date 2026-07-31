@@ -212,5 +212,7 @@ export interface SavedProduct {
   createdAt: string;
   lastUsedAt?: string;
   useCount: number;
+  dataQualityWarning?: string;
+  manuallyCorrected?: boolean;
 }
 
