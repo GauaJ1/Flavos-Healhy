@@ -43,7 +43,13 @@ const MacroBar: React.FC<{ label: string; value: number; total: number; color: s
 };
 
 const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyzeAnother, onSave }) => {
-  const imageUrl = imageFile ? URL.createObjectURL(imageFile) : '';
+  const imageUrl = useMemo(() => (imageFile ? URL.createObjectURL(imageFile) : ''), [imageFile]);
+
+  useEffect(() => {
+    return () => {
+      if (imageUrl) URL.revokeObjectURL(imageUrl);
+    };
+  }, [imageUrl]);
   
   const [isRefining, setIsRefining] = useState(result.analysisMetadata?.requiresFollowUp || false);
   const [answers, setAnswers] = useState<Record<string, any>>({});
@@ -90,7 +96,7 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
   const runTime = Math.round(finalCalories / 10); // ~10 kcal/min correndo
 
   // Densidade calórica e termômetro
-  const densityValue = result.nutritionalSummary.calorieDensity || 'media';
+  const densityValue = result.nutritionalSummary?.calorieDensity || 'media';
   const densityPercent = 
     densityValue === 'baixa' ? '16.6%' : 
     densityValue === 'media' ? '50%' : '83.3%';
@@ -206,7 +212,7 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
 
   useEffect(() => {
     if (result.analysisMetadata && !result.analysisMetadata.requiresFollowUp && !hasSaved && result.analysisMetadata.isRealFood) {
-      triggerSave(currentResult, result.nutritionalSummary.baseCalories);
+      triggerSave(currentResult, result.nutritionalSummary?.baseCalories || 0);
       setHasSaved(true);
     }
   }, [result, hasSaved, currentResult, triggerSave]);
@@ -259,10 +265,10 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
   };
 
   const handleFinishRefinement = () => {
-    let calc = result.nutritionalSummary.baseCalories;
+    let calc = result.nutritionalSummary?.baseCalories || 0;
     let fraction = 1;
 
-    result.analysisMetadata.followUpQuestions.forEach(q => {
+    (result.analysisMetadata?.followUpQuestions || []).forEach(q => {
       const ans = answers[q.id];
       if (ans && typeof ans === 'object' && ans.isCustom) {
         calc += ans.calorieImpact;
@@ -304,7 +310,7 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
   };
 
   const handleSkipRefinement = () => {
-    const final = result.nutritionalSummary.maxPossibleCalories;
+    const final = result.nutritionalSummary?.maxPossibleCalories || result.nutritionalSummary?.baseCalories || 0;
     setFinalCalories(final);
     setIsRefining(false);
     triggerSave(currentResult, final);
@@ -442,7 +448,7 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
         <p className="text-gray-300 mb-6 text-sm">Encontramos seu prato, mas precisamos de alguns detalhes para sermos exatos.</p>
 
         <div className="space-y-6">
-          {result.analysisMetadata.followUpQuestions.map(q => {
+          {(result.analysisMetadata?.followUpQuestions || []).map(q => {
             const isCustom = customModes[q.id];
             return (
               <div key={q.id} className="bg-gray-900/50 p-5 rounded-xl border border-gray-700 space-y-4">
@@ -543,8 +549,8 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
     );
   }
 
-  const displayCalories = result.analysisMetadata.requiresFollowUp && !hasSaved
-    ? `${result.nutritionalSummary.baseCalories} - ${result.nutritionalSummary.maxPossibleCalories}`
+  const displayCalories = result.analysisMetadata?.requiresFollowUp && !hasSaved
+    ? `${result.nutritionalSummary?.baseCalories ?? 0} - ${result.nutritionalSummary?.maxPossibleCalories ?? 0}`
     : finalCalories;
 
   return (
@@ -566,11 +572,11 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
             <div className="flex justify-between items-start mb-2">
               <p className="text-emerald-400 font-semibold tracking-wide uppercase text-sm">Total Estimado</p>
               <span className={`text-xs font-bold px-2 py-1 rounded-md uppercase ${
-                result.analysisMetadata.confidence === 'alta' ? 'bg-emerald-500/20 text-emerald-400' :
-                result.analysisMetadata.confidence === 'media' ? 'bg-yellow-500/20 text-yellow-400' :
+                result.analysisMetadata?.confidence === 'alta' ? 'bg-emerald-500/20 text-emerald-400' :
+                result.analysisMetadata?.confidence === 'media' ? 'bg-yellow-500/20 text-yellow-400' :
                 'bg-orange-500/20 text-orange-400'
               }`}>
-                Confiança {result.analysisMetadata.confidence}
+                Confiança {result.analysisMetadata?.confidence || 'alta'}
               </span>
             </div>
 
@@ -608,31 +614,31 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ result, imageFile, onAnalyz
               </div>
             </div>
             
-            {(result.nutritionalSummary.possiblePositiveComponents?.length > 0 || result.nutritionalSummary.possibleAttentionPoints?.length > 0) && (
+            {(result.nutritionalSummary?.possiblePositiveComponents?.length || 0) > 0 || (result.nutritionalSummary?.possibleAttentionPoints?.length || 0) > 0 ? (
               <div className="grid grid-cols-2 gap-4 mb-6 relative z-10">
-                {result.nutritionalSummary.possiblePositiveComponents && result.nutritionalSummary.possiblePositiveComponents.length > 0 && (
+                {result.nutritionalSummary?.possiblePositiveComponents && result.nutritionalSummary.possiblePositiveComponents.length > 0 && (
                   <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-3">
                     <p className="text-emerald-400 text-xs font-bold mb-1 flex items-center gap-1">✨ Positivos</p>
                     <p className="text-gray-300 text-xs">{result.nutritionalSummary.possiblePositiveComponents.join(', ')}</p>
                   </div>
                 )}
-                {result.nutritionalSummary.possibleAttentionPoints && result.nutritionalSummary.possibleAttentionPoints.length > 0 && (
+                {result.nutritionalSummary?.possibleAttentionPoints && result.nutritionalSummary.possibleAttentionPoints.length > 0 && (
                   <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl p-3">
                     <p className="text-orange-400 text-xs font-bold mb-1 flex items-center gap-1">⚠️ Atenção</p>
                     <p className="text-gray-300 text-xs">{result.nutritionalSummary.possibleAttentionPoints.join(', ')}</p>
                   </div>
                 )}
               </div>
-            )}
+            ) : null}
             
             <div className="flex items-center gap-2 mb-6 relative z-10">
               <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Saciedade Estimada:</span>
               <span className={`text-xs font-bold px-2 py-1 rounded-md ${
-                result.nutritionalSummary.satietyEstimate === 'alta' ? 'bg-emerald-500/20 text-emerald-400' :
-                result.nutritionalSummary.satietyEstimate === 'media' ? 'bg-yellow-500/20 text-yellow-400' :
+                result.nutritionalSummary?.satietyEstimate === 'alta' ? 'bg-emerald-500/20 text-emerald-400' :
+                result.nutritionalSummary?.satietyEstimate === 'media' ? 'bg-yellow-500/20 text-yellow-400' :
                 'bg-red-500/20 text-red-400'
               }`}>
-                {result.nutritionalSummary.satietyEstimate?.toUpperCase() || 'MÉDIA'}
+                {result.nutritionalSummary?.satietyEstimate?.toUpperCase() || 'MÉDIA'}
               </span>
             </div>
 

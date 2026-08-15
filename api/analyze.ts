@@ -303,7 +303,7 @@ export default async function handler(req: any, res: any) {
   // imageBase64: imagem 1280px JPEG ~0.75 qual ≈ ~500 KB → base64 ≈ 680 KB
   // Limite generoso de 2 MB para absorver variações de qualidade
   const MAX_IMAGE_B64_CHARS = 2 * 1024 * 1024; // 2 MB em caracteres base64
-  const MAX_CONTEXT_CHARS = 500;
+  const MAX_CONTEXT_CHARS = 4000;
   const MAX_TEXT_PROMPT_CHARS = 8000;
 
   if (imageBase64 && typeof imageBase64 !== 'string') {
@@ -313,7 +313,7 @@ export default async function handler(req: any, res: any) {
     return res.status(413).json({ error: 'Imagem muito grande. Limite: 2 MB.' });
   }
   if (userContext && (typeof userContext !== 'string' || userContext.length > MAX_CONTEXT_CHARS)) {
-    return res.status(422).json({ error: 'Contexto do usuário muito longo. Limite: 500 caracteres.' });
+    return res.status(422).json({ error: 'Contexto do usuário muito longo. Limite: 4.000 caracteres.' });
   }
   if (textPrompt && typeof textPrompt !== 'string') {
     return res.status(422).json({ error: 'textPrompt deve ser uma string' });
